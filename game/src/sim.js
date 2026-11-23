@@ -347,7 +347,16 @@ export function step(s, input, dt) {
     car.speed -= car.speed * 0.35 * dt; // drag
     car.speed = clamp(car.speed, -11, 26 + s.wanted);
     const steer = (input.left ? -1 : 0) + (input.right ? 1 : 0);
-    if (Math.abs(car.speed) > 0.2) car.ry += steer * dt * 1.7 * Math.sign(car.speed) * clamp(Math.abs(car.speed) / 9, 0.3, 1);
+    car.steer = steer;
+    if (Math.abs(car.speed) > 0.2) {
+      // Steer around the rear axle, not the geometric centre.
+      const dRy = steer * dt * 1.7 * Math.sign(car.speed) * clamp(Math.abs(car.speed) / 9, 0.3, 1);
+      const fx = Math.sin(car.ry), fz = Math.cos(car.ry);
+      const ax = car.x - fx * 1.35, az = car.z - fz * 1.35; // rear axle point
+      car.ry += dRy;
+      const nfx = Math.sin(car.ry), nfz = Math.cos(car.ry);
+      car.x = ax + nfx * 1.35; car.z = az + nfz * 1.35;
+    }
     let nx = car.x + Math.sin(car.ry) * car.speed * dt;
     let nz = car.z + Math.cos(car.ry) * car.speed * dt;
     const [cx, cz] = collideBuildings(s.city, nx, nz, 1.7);

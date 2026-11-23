@@ -76,6 +76,17 @@ export function genCity(seed) {
       }
     }
   }
+  // Street props for density: bins, barriers, hydrants, crates along sidewalks.
+  const props = [];
+  const centers2 = roadCenters();
+  for (let i = 0; i < 90; i++) {
+    const road = centers2[rng.int(0, centers2.length - 1)];
+    const horiz = rng.chance(0.5);
+    const t = rng.range(-CITY_HALF + 6, CITY_HALF - 6);
+    const side = (rng.chance(0.5) ? 1 : -1) * rng.range(8.8, 10.8);
+    const kind = rng.pick(['bin', 'bin', 'barrier', 'hydrant', 'crate']);
+    props.push({ x: horiz ? t : road + side, z: horiz ? road + side : t, kind, ry: rng.range(0, Math.PI), color: PALETTE[rng.int(0, PALETTE.length - 1)] });
+  }
   // Special zones pinned to fixed lots so missions are stable across seeds.
   const zones = {
     gunshop: { x: -BLOCK * 1.5, z: -BLOCK * 0.5, r: 7, label: 'GUN SHOP', color: [1, 0.6, 0.2] },
@@ -83,7 +94,7 @@ export function genCity(seed) {
     spray: { x: BLOCK * 0.5, z: -BLOCK * 1.5, r: 7, label: "PAY 'N SPRAY", color: [0.3, 1, 0.6] },
     contact: { x: -BLOCK * 0.5, z: BLOCK * 1.5, r: 6, label: 'CONTACT', color: [1, 0.3, 0.7] },
   };
-  return { buildings, palms, lights, signs, zones, seed };
+  return { buildings, palms, lights, signs, zones, props, seed };
 }
 
 // Building collision: circle vs AABB, returns push-out or null.

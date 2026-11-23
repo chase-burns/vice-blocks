@@ -32,6 +32,23 @@ export function mat4Model(x, y, z, ry, sx, sy, sz) {
     s*sz, 0, c*sz, 0,
     x, y, z, 1]);
 }
+// Model with yaw + pitch (around local X) + roll (around local Z), for body pose.
+export function mat4ModelPose(x, y, z, ry, pitch, roll, sx, sy, sz) {
+  const cy = Math.cos(ry), syw = Math.sin(ry);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  // R = Ry * Rx * Rz
+  const m = [
+    cy*cr + syw*sp*sr, cp*sr, -syw*cr + cy*sp*sr, 0,
+    -cy*sr + syw*sp*cr, cp*cr, syw*sr + cy*sp*cr, 0,
+    syw*cp, -sp, cy*cp, 0,
+    0, 0, 0, 1];
+  const o = new Float32Array(16);
+  const scale = [sx, sy, sz];
+  for (let c = 0; c < 3; c++) for (let r = 0; r < 4; r++) o[c*4+r] = m[c*4+r] * (r < 3 ? scale[c] : 1);
+  o[12] = x; o[13] = y; o[14] = z; o[15] = 1;
+  return o;
+}
 
 const VS = `
 attribute vec3 aPos; attribute vec3 aNorm; attribute vec2 aUv; attribute vec3 aCol;
@@ -49,21 +66,27 @@ void main(){
 const FS = `
 precision mediump float;
 varying vec3 vNorm; varying vec2 vUv; varying vec3 vCol; varying float vFog; varying vec3 vWp;
-uniform sampler2D uTex; uniform float uUseTex; uniform float uEmissive;
+uniform sampler2D uTex; uniform float uUseTex; uniform float uEmissive; uniform float uAlpha;
 uniform vec3 uSun; uniform vec3 uFogColor; uniform vec3 uCam;
 void main(){
   vec3 base = vCol;
   if (uUseTex > 0.5) base *= texture2D(uTex, vUv).rgb;
   vec3 n = normalize(vNorm);
   float diff = max(dot(n, normalize(uSun)), 0.0);
-  vec3 col = base * (0.42 + 0.65 * diff);
-  // cheap specular glint on upward faces
+  // Hemisphere ambient: warm dark ground bounce vs neon sky tint.
+  vec3 hemi = mix(vec3(0.30,0.20,0.30), vec3(0.45,0.52,0.62), n.y * 0.5 + 0.5);
+  vec3 col = base * (hemi + 0.62 * diff * vec3(1.0,0.92,0.82));
+  // Wet-surface sheen: strong low-angle specular on upward faces, tinted by base.
   vec3 v = normalize(uCam - vWp);
   vec3 hv = normalize(v + normalize(uSun));
-  col += pow(max(dot(n, hv), 0.0), 24.0) * 0.12 * step(0.5, n.y);
-  col = mix(col, base * 1.25, uEmissive);
-  col = mix(col, uFogColor, vFog * 0.85);
-  gl_FragColor = vec4(col, 1.0);
+  float spec = pow(max(dot(n, hv), 0.0), 42.0);
+  float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
+  col += (spec * 0.55 + fres * 0.10) * step(0.5, n.y) * mix(vec3(1.0), base + 0.35, 0.5);
+  col = mix(col, base * 1.3, uEmissive);
+  // Exponential distance fog toward the sky colour.
+  float fogF = 1.0 - exp(-pow(vFog * 2.6, 2.0));
+  col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));
+  gl_FragColor = vec4(col, uAlpha);
 }`;
 
 export class Renderer {
@@ -88,6 +111,7 @@ export class Renderer {
       tex: gl.getUniformLocation(prog, 'uTex'), useTex: gl.getUniformLocation(prog, 'uUseTex'),
       emissive: gl.getUniformLocation(prog, 'uEmissive'), sun: gl.getUniformLocation(prog, 'uSun'),
       fog: gl.getUniformLocation(prog, 'uFogColor'), cam: gl.getUniformLocation(prog, 'uCam'),
+      alpha: gl.getUniformLocation(prog, 'uAlpha'),
     };
     gl.enable(gl.DEPTH_TEST);
     gl.clearColor(0.98, 0.62, 0.45, 1);
@@ -97,7 +121,7 @@ export class Renderer {
     this.unitCube = this.makeMesh(unitCubeData());
   }
   resize() {
-    const c = this.canvas, dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const c = this.canvas, dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = Math.floor(c.clientWidth * dpr), h = Math.floor(c.clientHeight * dpr);
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; this.gl.viewport(0, 0, w, h); }
     return [w, h];
@@ -135,8 +159,14 @@ export class Renderer {
     gl.uniformMatrix4fv(this.loc.model, false, model);
     gl.uniform1f(this.loc.useTex, opts.tex ? 1 : 0);
     gl.uniform1f(this.loc.emissive, opts.emissive ? 1 : 0);
+    gl.uniform1f(this.loc.alpha, opts.alpha != null ? opts.alpha : 1);
+    if (opts.alpha != null && opts.alpha < 1) {
+      gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+    }
     if (opts.tex) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.textures[opts.tex]); }
     gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
+    if (opts.alpha != null && opts.alpha < 1) { gl.depthMask(true); gl.disable(gl.BLEND); }
   }
   box(x, y, z, ry, w, h, d, color, opts = {}) {
     // unit cube scaled; colour baked via a tint mesh cache keyed by colour
@@ -144,7 +174,10 @@ export class Renderer {
     if (!this._tints) this._tints = new Map();
     let mesh = this._tints.get(key);
     if (!mesh) { mesh = this.makeMesh(unitCubeData(color)); this._tints.set(key, mesh); }
-    this.draw(mesh, mat4Model(x, y, z, ry, w, h, d), opts);
+    const model = (opts.pitch || opts.roll)
+      ? mat4ModelPose(x, y, z, ry, opts.pitch || 0, opts.roll || 0, w, h, d)
+      : mat4Model(x, y, z, ry, w, h, d);
+    this.draw(mesh, model, opts);
   }
 }
 
