@@ -23,7 +23,7 @@ function persist(s) {
 }
 
 // ---------- audio (synthesised, created on first gesture) ----------
-let AC = null, engineOsc = null, engineGain = null, sirenOsc = null, sirenGain = null;
+let AC = null, engineOsc = null, engineGain = null, sirenOsc = null, sirenGain = null, screechGain = null;
 function audioInit() {
   if (AC || shotMode) return;
   try {
@@ -35,6 +35,15 @@ function audioInit() {
     sirenOsc = AC.createOscillator(); sirenOsc.type = 'triangle';
     sirenGain = AC.createGain(); sirenGain.gain.value = 0;
     sirenOsc.connect(sirenGain); sirenGain.connect(AC.destination); sirenOsc.start();
+    // tyre screech: looped noise through a bandpass, gain follows slip
+    const len = AC.sampleRate;
+    const buf = AC.createBuffer(1, len, AC.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const src = AC.createBufferSource(); src.buffer = buf; src.loop = true;
+    const bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 950; bp.Q.value = 2.5;
+    screechGain = AC.createGain(); screechGain.gain.value = 0;
+    src.connect(bp); bp.connect(screechGain); screechGain.connect(AC.destination); src.start();
   } catch { AC = null; }
 }
 function beep(freq, dur, type = 'square', vol = 0.12, slide = 0) {
@@ -59,9 +68,15 @@ function noiseBurst(dur, vol, freq) {
 }
 function audioFrame(s) {
   if (!AC) return;
-  const inCar = !!s.player.inCar;
-  engineGain.gain.value = inCar && s.mode === 'play' ? 0.05 : 0;
-  if (inCar) engineOsc.frequency.value = 55 + Math.abs(s.player.inCar.speed) * 6;
+  const car = s.player.inCar;
+  engineGain.gain.value = car && s.mode === 'play' ? 0.055 : 0;
+  if (car) {
+    // pitch follows rpm (with gear steps baked into rpm by the sim)
+    engineOsc.frequency.value = 48 + (car.rpm || 0.3) * 165;
+    const slip = Math.abs(car.slip || 0);
+    const screech = (slip > 1.1 && Math.abs(car.speed) > 4) || (car.handbrake && Math.abs(car.speed) > 6);
+    screechGain.gain.value = screech && s.mode === 'play' ? Math.min(0.14, slip * 0.03) : 0;
+  } else if (screechGain) screechGain.gain.value = 0;
   const copsNear = s.cops.some(c => c.kind === 'cop');
   sirenGain.gain.value = copsNear && s.mode === 'play' ? 0.035 : 0;
   if (sirenOsc) sirenOsc.frequency.value = (Math.floor(s.time * 1.6) % 2 === 0) ? 660 : 880;
@@ -173,7 +188,60 @@ function drawParticles() {
   }
 }
 
-function drawCar(s, car, t) {
+function drawInterior(s, car) {
+  const fx = Math.sin(car.ry), fz = Math.cos(car.ry);
+  const rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
+  const at = (f, r, y) => [car.x + fx * f + rx * r, y, car.z + fz * f + rz * r];
+  // dashboard: dark slab + top pad + glowing gauge dots
+  let q = at(1.02, 0, 0.80);
+  R.box(q[0], q[1], q[2], car.ry, 2.05, 0.34, 0.5, [0.09, 0.09, 0.12]);
+  q = at(1.06, 0, 0.99);
+  R.box(q[0], q[1], q[2], car.ry, 2.05, 0.07, 0.42, [0.16, 0.15, 0.2]);
+  for (const [gr, col] of [[-0.62, [0.4, 0.95, 1]], [-0.44, [1, 0.6, 0.3]], [-0.26, [0.5, 1, 0.6]]]) {
+    q = at(1.24, gr, 0.88);
+    R.box(q[0], q[1], q[2], car.ry, 0.09, 0.09, 0.03, col, { emissive: true });
+  }
+  // steering wheel: open rim built from bars (see-through centre), spins with the front wheels
+  const wheelRoll = -(car.steerAngle || 0) * 4.2;
+  const wc = at(0.66, -0.44, 0.86);
+  const wob = (dx, dy) => {
+    // offset in the wheel's rolled frame: local X = car right, local Y = world up (approx)
+    const cr = Math.cos(wheelRoll), sr = Math.sin(wheelRoll);
+    const lx = dx * cr - dy * sr, ly = dx * sr + dy * cr;
+    return [wc[0] + rx * lx, wc[1] + ly, wc[2] + rz * lx];
+  };
+  let b;
+  b = wob(0, 0.21); R.box(b[0], b[1], b[2], car.ry, 0.5, 0.07, 0.07, [0.07, 0.07, 0.09], { pitch: -0.32, roll: wheelRoll });
+  b = wob(0, -0.21); R.box(b[0], b[1], b[2], car.ry, 0.5, 0.07, 0.07, [0.07, 0.07, 0.09], { pitch: -0.32, roll: wheelRoll });
+  b = wob(-0.21, 0); R.box(b[0], b[1], b[2], car.ry, 0.07, 0.36, 0.07, [0.07, 0.07, 0.09], { pitch: -0.32, roll: wheelRoll });
+  b = wob(0.21, 0); R.box(b[0], b[1], b[2], car.ry, 0.07, 0.36, 0.07, [0.07, 0.07, 0.09], { pitch: -0.32, roll: wheelRoll });
+  b = wob(0, -0.1); R.box(b[0], b[1], b[2], car.ry, 0.07, 0.22, 0.08, [0.2, 0.2, 0.24], { pitch: -0.32, roll: wheelRoll });
+  b = wob(0, 0); R.box(b[0], b[1], b[2], car.ry, 0.17, 0.17, 0.11, [0.12, 0.12, 0.15], { pitch: -0.32, roll: wheelRoll });
+  // mirrors
+  for (const sd of [-1, 1]) {
+    q = at(0.92, sd * 1.04, 1.3);
+    R.box(q[0], q[1], q[2], car.ry, 0.3, 0.17, 0.05, [0.08, 0.08, 0.1]);
+    q = at(0.9, sd * 1.03, 1.3);
+    R.box(q[0], q[1], q[2], car.ry, 0.24, 0.12, 0.02, [0.75, 0.85, 0.95], { emissive: true });
+  }
+  // roof brow so the top of the windscreen reads as a car, not a void
+  q = at(1.12, 0, 1.66);
+  R.box(q[0], q[1], q[2], car.ry, 2.05, 0.09, 0.3, [0.08, 0.08, 0.11]);
+}
+function drawGunView(s, eye, viewYaw, viewPitch) {
+  const d = viewDir(viewYaw, viewPitch);
+  const rx = Math.cos(viewYaw), rz = -Math.sin(viewYaw);
+  const aim = s.player.aim;
+  const rOff = aim ? 0 : 0.23, dOff = aim ? 0.42 : 0.5, yOff = aim ? -0.145 : -0.27;
+  const gx = eye[0] + d[0] * dOff + rx * rOff, gy = eye[1] + d[1] * dOff + yOff, gz = eye[2] + d[2] * dOff + rz * rOff;
+  R.box(gx, gy, gz, viewYaw, 0.09, 0.15, 0.46, [0.1, 0.1, 0.12], { pitch: viewPitch });
+  R.box(gx + d[0] * 0.3, gy + d[1] * 0.3 + 0.02, gz + d[2] * 0.3, viewYaw, 0.05, 0.05, 0.26, [0.16, 0.16, 0.18], { pitch: viewPitch });
+  // hand + forearm coming up from below
+  R.box(gx - d[0] * 0.08 + rx * 0.02, gy - 0.13, gz - d[2] * 0.08 + rz * 0.02, viewYaw, 0.15, 0.11, 0.2, [0.92, 0.76, 0.6], { pitch: viewPitch });
+  if (!aim) R.box(gx - d[0] * 0.22 + rx * 0.1, gy - 0.3, gz - d[2] * 0.22 + rz * 0.1, viewYaw, 0.13, 0.13, 0.42, [0.95, 0.45, 0.75], { pitch: viewPitch + 0.5 });
+}
+
+function drawCar(s, car, t, interior = false) {
   const smoke = car.smoke;
   const body = car.kind === 'dead' ? [0.15,0.15,0.15] : car.color;
   const x = car.x, z = car.z, ry = car.ry;
@@ -191,7 +259,7 @@ function drawCar(s, car, t) {
   car._roll = clamp((car._roll || 0) + (clamp(-dry * 2.4, -0.09, 0.09) - (car._roll || 0)) * 0.2, -0.1, 0.1);
   const pitch = car._pitch, roll = car._roll;
   R.box(x, 0.35, z, ry, 2.0, 0.75, 4.2, body, { pitch, roll });
-  R.box(x, 0.95, z, ry, 1.8, 0.62, 2.2, car.kind === 'cop' ? [0.12,0.12,0.14] : [0.15,0.2,0.28], { pitch, roll });
+  if (!interior) R.box(x, 0.95, z, ry, 1.8, 0.62, 2.2, car.kind === 'cop' ? [0.12,0.12,0.14] : [0.15,0.2,0.28], { pitch, roll });
   if (car.kind === 'cop') {
     const flash = Math.floor(t * 3) % 2 === 0;
     R.box(x, 1.32, z, ry, 1.2, 0.22, 0.5, flash ? [1,0.15,0.2] : [0.2,0.4,1], { emissive: true });
@@ -297,7 +365,18 @@ function setupShot(kind) {
     }
     s.bustTimer = 3.2;
   }
-  if (kind === 'start') { s.cash = 120; }
+  if (kind === 'start') {
+    // Title seen from the driver's seat of a parked car at an intersection.
+    s.cash = 120;
+    const car = s.cars.find(c => c.kind === 'parked');
+    car.kind = 'player'; car.x = BLOCK * 0.5; car.z = BLOCK * 0.5; car.ry = Math.PI / 2; car.speed = 0;
+    car.steerAngle = 0.22; car.steer = 1;
+    p.inCar = car; p.x = car.x; p.z = car.z;
+  }
+  if ((kind === 'play' || kind === 'chase') && p.inCar) {
+    p.inCar.steerAngle = kind === 'chase' ? 0.34 : 0.14;
+    p.inCar.steer = 1;
+  }
 }
 if (shotMode) setupShot(shotMode);
 
@@ -320,7 +399,7 @@ canvas.addEventListener('mousedown', (e) => {
 });
 addEventListener('mouseup', (e) => { if (e.button === 0) mouseDownL = false; if (e.button === 2) mouseDownR = false; });
 addEventListener('mousemove', (e) => {
-  if (document.pointerLockElement === canvas) { mouseDX += e.movementX; mouseDY += e.movementY; }
+  if (document.pointerLockElement === canvas) { mouseDX += e.movementX; mouseDY += e.movementY; lastLookMove = performance.now(); }
 });
 addEventListener('contextmenu', (e) => e.preventDefault());
 ui.overlay.addEventListener('click', () => { audioInit(); confirmOverlay(); });
@@ -349,11 +428,13 @@ function confirmOverlay() {
   else if (S.mode === 'paused') S.mode = 'play';
 }
 
+let lookYaw = 0, lookPitch = 0, lastLookMove = 0;
 function readInput() {
   return {
     up: !!(keys.KeyW || keys.ArrowUp), down: !!(keys.KeyS || keys.ArrowDown),
     left: !!(keys.KeyA || keys.ArrowLeft), right: !!(keys.KeyD || keys.ArrowRight),
     shift: !!(keys.ShiftLeft || keys.ShiftRight),
+    handbrake: !!keys.Space,
     aim: mouseDownR, interact: !!keys.KeyE && !nearCar(),
   };
 }
@@ -430,40 +511,59 @@ function updateHUD(s) {
   drawMinimap(s);
 }
 
-// ---------- rendering ----------
+// ---------- rendering (first person) ----------
 let lastDt = 1 / 60;
-const camSmooth = { eye: null, center: null, roll: 0 };
+let shakeAmp = 0;
+function viewDir(yaw, pitch) {
+  const cp = Math.cos(pitch);
+  return [Math.sin(yaw) * cp, -Math.sin(pitch), Math.cos(yaw) * cp];
+}
 function render(s, t) {
   const [w, h] = R.resize();
   const p = s.player;
-  const speedNow = p.inCar ? Math.abs(p.inCar.speed) : 0;
-  const fov = 1.15 + clamp(speedNow / 30, 0, 1) * 0.17; // FOV stretches with speed
-  const proj = mat4Perspective(fov, w / h, 0.1, 700);
+  const car = p.inCar;
+  const speedNow = car ? Math.abs(car.speed) : 0;
+  // FOV: wide FP base, stretches a little with speed and throttle
+  const fov = 1.24 + clamp(speedNow / 27, 0, 1) * 0.10 + (car && keys.KeyW ? (car.rpm || 0) * 0.02 : 0);
+  const proj = mat4Perspective(fov, w / h, 0.05, 700);
   let eye, center, up = [0, 1, 0];
-  if (shotMode === 'start') {
-    eye = [-70, 52, 120]; center = [10, 0, -10];
-  } else if (s.mode === 'title') {
-    const a = t * 0.07;
-    eye = [Math.sin(a) * 120, 46, Math.cos(a) * 120]; center = [0, 4, 0];
-  } else {
-    const dist = p.inCar ? 10.5 : 7.5;
-    const height = p.inCar ? 3.4 : 3.1; // driving cam sits lower, closer to the road
-    const cx = p.x - Math.sin(s.camYaw) * dist, cz = p.z - Math.cos(s.camYaw) * dist;
-    eye = [cx, height + Math.sin(s.camPitch) * 4, cz];
-    center = [p.x + Math.sin(s.camYaw) * 6, 1.3, p.z + Math.cos(s.camYaw) * 6];
-    // spring follow: smooth eye/center toward targets
-    if (!camSmooth.eye) { camSmooth.eye = [...eye]; camSmooth.center = [...center]; }
-    const k = 1 - Math.exp(-lastDt * (p.inCar ? 7 : 10));
-    for (let i = 0; i < 3; i++) {
-      camSmooth.eye[i] += (eye[i] - camSmooth.eye[i]) * k;
-      camSmooth.center[i] += (center[i] - camSmooth.center[i]) * k;
+  let viewYaw = s.camYaw, viewPitch = lookPitch;
+  if (car) {
+    // Driver's seat: left seat offset, dash height, view = heading + look offset.
+    const fx = Math.sin(car.ry), fz = Math.cos(car.ry);
+    const rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
+    eye = [car.x - rx * 0.44 + fx * 0.15, 1.22, car.z - rz * 0.44 + fz * 0.15];
+    viewYaw = car.ry + lookYaw;
+    // road feel: kerb jitter + speed-bump pulses + accel/brake pitch
+    const centers = roadCenters();
+    let latOff = 1e9;
+    for (const c of centers) latOff = Math.min(latOff, Math.abs(car.x - c), Math.abs(car.z - c));
+    let jolt = 0;
+    if (speedNow > 4) {
+      if (latOff > 6.1 && latOff < 9.5) jolt += Math.sin(t * 43) * 0.016; // running the kerb
+      const gridD = Math.min(Math.abs(((car.x % 23) + 23) % 23 - 11.5), Math.abs(((car.z % 23) + 23) % 23 - 11.5));
+      if (gridD > 10.6) jolt += Math.sin(t * 34) * 0.02 * clamp(speedNow / 14, 0, 1); // bump strips
     }
-    eye = camSmooth.eye; center = camSmooth.center;
-    // camera roll leans into turns
-    const targetRoll = p.inCar ? clamp(-(p.inCar.steer || 0) * clamp(speedNow / 18, 0, 1) * 0.05, -0.05, 0.05) : 0;
-    camSmooth.roll += (targetRoll - camSmooth.roll) * Math.min(1, lastDt * 5);
-    const r = camSmooth.roll;
-    up = [-Math.cos(s.camYaw) * r * 8, 1, Math.sin(s.camYaw) * r * 8];
+    eye[1] += jolt;
+    const accel = clamp(((car.speed || 0) - (car._camPs || 0)) / Math.max(lastDt, 0.001), -30, 30);
+    car._camPs = car.speed || 0;
+    viewPitch = lookPitch + clamp(accel * 0.0016, -0.028, 0.02); // nose-dive under braking, lift on launch
+    const d = viewDir(viewYaw, viewPitch);
+    center = [eye[0] + d[0] * 10, eye[1] + d[1] * 10, eye[2] + d[2] * 10];
+    const roll = clamp(-(car.steerAngle || 0) * clamp(speedNow / 20, 0, 1) * 0.35, -0.06, 0.06);
+    up = [-Math.cos(viewYaw) * roll, 1, Math.sin(viewYaw) * roll];
+    void rx; void rz;
+  } else if (shotMode === 'start') {
+    eye = [-70, 52, 120]; center = [10, 0, -10];
+  } else {
+    // On foot: eye height, free mouse look.
+    eye = [p.x, 1.62, p.z];
+    viewYaw = s.camYaw; viewPitch = lookPitch;
+    const d = viewDir(viewYaw, viewPitch);
+    center = [eye[0] + d[0] * 10, eye[1] + d[1] * 10, eye[2] + d[2] * 10];
+  }
+  if (shakeAmp > 0.002) {
+    eye = [eye[0] + (Math.random() - 0.5) * shakeAmp, eye[1] + (Math.random() - 0.5) * shakeAmp * 0.7, eye[2] + (Math.random() - 0.5) * shakeAmp];
   }
   const view = mat4LookAt(eye, center, up);
   R.begin(view, proj, eye);
@@ -485,8 +585,8 @@ function render(s, t) {
     R.box(s.mission.van.x, 0.4, s.mission.van.z, 0.4, 2.4, 1.1, 5, [0.15, 0.6, 0.3]);
     R.box(s.mission.van.x, 1.35, s.mission.van.z, 0.4, 2.2, 0.7, 2.6, [0.1, 0.45, 0.22]);
   }
-  // actors
-  for (const c of s.cars) drawCar(s, c, t);
+  // actors (the driven car loses its cabin/roof: the camera sits inside it)
+  for (const c of s.cars) drawCar(s, c, t, c === p.inCar);
   for (const c of s.cops) if (c !== p.inCar) drawCar(s, c, t);
   for (const ped of s.peds) {
     if (ped.state === 'dead') {
@@ -496,8 +596,10 @@ function render(s, t) {
       if (ped.state === 'robbed') R.box(ped.x, 2.35, ped.z, 0, 0.3, 0.3, 0.3, [1, 0.85, 0.3], { emissive: true });
     }
   }
-  if (!p.inCar) drawPerson(s, p.x, p.z, p.ry, [0.95, 0.45, 0.75], { walkPhase: s.time * 9, gun: p.aim });
   drawParticles();
+  // first-person overlays-in-world: car interior, or the gun in your hands
+  if (p.inCar) drawInterior(s, p.inCar);
+  else if (s.hasGun && s.mode !== 'title') drawGunView(s, eye, viewYaw, viewPitch);
   // crosshair handled by CSS when aiming
   document.body.classList.toggle('aiming', !!p.aim && s.mode === 'play');
 }
@@ -515,6 +617,7 @@ function handleEvents(s) {
       }
       case 'crash': case 'ram': {
         noiseBurst(0.25, 0.4, 300);
+        shakeAmp = Math.min(0.55, 0.12 + (e.data || 8) * 0.022); // impact shake scales with hit speed
         const c = S.player.inCar || S.player;
         for (let i = 0; i < 14; i++) {
           const a = Math.random() * Math.PI * 2;
@@ -547,20 +650,30 @@ function loop(now) {
   lastDt = dt;
   const t = now / 1000;
   if (!shotMode) {
-    // camera from mouse
+    // mouse look: on foot = free look; in car = glance offset (mirrors / side streets)
     if (mouseDX || mouseDY) {
-      S.camYaw -= mouseDX * 0.0032;
-      S.camPitch = clamp(S.camPitch + mouseDY * 0.002, -0.05, 0.75);
+      if (S.player.inCar) {
+        lookYaw = clamp(lookYaw - mouseDX * 0.0022, -1.15, 1.15);
+        lookPitch = clamp(lookPitch + mouseDY * 0.0018, -0.45, 0.55);
+      } else {
+        S.camYaw -= mouseDX * 0.003;
+        lookPitch = clamp(lookPitch + mouseDY * 0.0022, -0.85, 0.85);
+      }
       mouseDX = 0; mouseDY = 0;
     }
+    if (S.player.inCar && performance.now() - lastLookMove > 1400) {
+      lookYaw *= Math.exp(-dt * 2.2); // glance recentres itself
+      lookPitch *= Math.exp(-dt * 2.2);
+    }
+    shakeAmp *= Math.exp(-dt * 5.5);
     if (S.mode === 'play') {
       if (mouseDownR && !S.player.inCar) S.player.ry = S.camYaw; // aim where camera looks
       step(S, readInput(), dt);
       for (const c of [...S.cars, ...S.cops]) c._spin = (c._spin || 0) + (c.speed || 0) * dt * 2.2;
       for (const ped of S.peds) ped._phase = (ped._phase || 0) + (ped.state === 'flee' ? 4.6 : ped.speed) * dt * 3.4;
-      // tyre smoke when the player's car turns hard at speed, or burns out
+      // tyre smoke when the tyres are sliding (drift / handbrake / hard cornering)
       const pc = S.player.inCar;
-      if (pc && Math.abs(pc.speed) > 7 && Math.abs(pc.steer || 0) > 0 && Math.random() < 0.75) {
+      if (pc && Math.abs(pc.speed) > 5 && (pc.slip || 0) > 1.1 && Math.random() < 0.85) {
         const fx = Math.sin(pc.ry), fz = Math.cos(pc.ry), rx = Math.cos(pc.ry), rz = -Math.sin(pc.ry);
         const sd = Math.random() < 0.5 ? 0.95 : -0.95;
         spawnP(pc.x + rx * sd - fx * 1.35, 0.3, pc.z + rz * sd - fz * 1.35,
@@ -570,14 +683,6 @@ function loop(now) {
       stepParticles(dt);
       handleEvents(S);
       audioFrame(S);
-    }
-    if (S.mode === 'play' && S.player.inCar) {
-      // camera eases behind the car
-      const target = S.player.inCar.ry + Math.PI;
-      let d = target - S.camYaw;
-      while (d > Math.PI) d -= Math.PI * 2;
-      while (d < -Math.PI) d += Math.PI * 2;
-      if (!document.pointerLockElement) S.camYaw += d * Math.min(1, dt * 2.5);
     }
   } else {
     // deterministic screenshot scenes: settle actors, then freeze

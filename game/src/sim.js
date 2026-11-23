@@ -161,6 +161,9 @@ export function enterExitCar(s) {
     if (d < bd) { bd = d; best = c; }
   }
   if (best) {
+    best.vx = Math.sin(best.ry) * (best.speed || 0);
+    best.vz = Math.cos(best.ry) * (best.speed || 0);
+    best.steerAngle = 0;
     p.inCar = best;
     if (best.kind === 'parked' || best.kind === 'traffic') {
       if (best.driver) { ev(s, 'yank'); }
@@ -342,34 +345,75 @@ export function step(s, input, dt) {
   // --- Player movement ---
   if (p.inCar) {
     const car = p.inCar;
-    const accel = input.up ? 16 : 0, brake = input.down ? (car.speed > 0.5 ? -26 : -9) : 0;
-    car.speed += (accel + brake) * dt;
-    car.speed -= car.speed * 0.35 * dt; // drag
-    car.speed = clamp(car.speed, -11, 26 + s.wanted);
-    const steer = (input.left ? -1 : 0) + (input.right ? 1 : 0);
-    car.steer = steer;
-    if (Math.abs(car.speed) > 0.2) {
-      // Steer around the rear axle, not the geometric centre.
-      const dRy = steer * dt * 1.7 * Math.sign(car.speed) * clamp(Math.abs(car.speed) / 9, 0.3, 1);
-      const fx = Math.sin(car.ry), fz = Math.cos(car.ry);
-      const ax = car.x - fx * 1.35, az = car.z - fz * 1.35; // rear axle point
-      car.ry += dRy;
-      const nfx = Math.sin(car.ry), nfz = Math.cos(car.ry);
-      car.x = ax + nfx * 1.35; car.z = az + nfz * 1.35;
+    // Velocity-vector driving model: heading vs velocity split gives real drift.
+    if (car.vx == null) { car.vx = Math.sin(car.ry) * (car.speed || 0); car.vz = Math.cos(car.ry) * (car.speed || 0); car.steerAngle = 0; }
+    let fx = Math.sin(car.ry), fz = Math.cos(car.ry);
+    let rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
+    let fSpeed = car.vx * fx + car.vz * fz;
+    let latSpeed = car.vx * rx + car.vz * rz;
+    // Steering: fast but weighted — angle target shrinks with speed, approach is damped.
+    const steerIn = (input.left ? -1 : 0) + (input.right ? 1 : 0);
+    const maxSteer = 0.62 - 0.4 * clamp(Math.abs(fSpeed) / 26, 0, 1); // low speed nimble, high speed stable
+    const target = steerIn * maxSteer;
+    const rate = (steerIn === 0 ? 3.4 : 2.6); // recentre a touch faster than turn-in
+    car.steerAngle += clamp(target - car.steerAngle, -rate * dt, rate * dt);
+    car.steerAngle *= Math.exp(-0.6 * dt * (steerIn === 0 ? 1 : 0)); // settle damping
+    car.steer = steerIn;
+    // Bicycle yaw around the rear axle.
+    const hb = !!input.handbrake;
+    car.handbrake = hb;
+    if (Math.abs(fSpeed) > 0.15) {
+      const yawRate = (fSpeed / 2.9) * Math.tan(car.steerAngle) * (hb ? 1.45 : 1);
+      const ax = car.x - fx * 1.35, az = car.z - fz * 1.35;
+      car.ry += yawRate * dt;
+      fx = Math.sin(car.ry); fz = Math.cos(car.ry);
+      rx = Math.cos(car.ry); rz = -Math.sin(car.ry);
+      car.x = ax + fx * 1.35; car.z = az + fz * 1.35;
+      // Re-split the (world-fixed) velocity into the new heading frame: the
+      // mismatch is exactly the slip that makes the tail step out.
+      const nvx = car.vx, nvz = car.vz;
+      fSpeed = nvx * fx + nvz * fz;
+      latSpeed = nvx * rx + nvz * rz;
     }
-    let nx = car.x + Math.sin(car.ry) * car.speed * dt;
-    let nz = car.z + Math.cos(car.ry) * car.speed * dt;
+    // Longitudinal forces.
+    let a = 0;
+    if (input.up) a += 15;
+    if (input.down) a += fSpeed > 0.5 ? -30 : -10; // brake, then reverse
+    if (hb) a -= Math.sign(fSpeed) * 6;
+    fSpeed += a * dt;
+    fSpeed -= fSpeed * (hb ? 0.22 : 0.32) * dt;
+    fSpeed = clamp(fSpeed, -11, 27);
+    // Lateral grip: strong normally, weak on handbrake (drift), tail swings out.
+    const grip = hb ? 1.1 : 9.5;
+    latSpeed *= Math.exp(-grip * dt);
+    if (hb && Math.abs(car.steerAngle) > 0.1) latSpeed += -Math.sign(car.steerAngle) * Math.abs(fSpeed) * 0.55 * dt;
+    car.slip = Math.abs(latSpeed);
+    car.vx = fx * fSpeed + rx * latSpeed;
+    car.vz = fz * fSpeed + rz * latSpeed;
+    car.speed = fSpeed;
+    car.velSpeed = Math.hypot(car.vx, car.vz);
+    // Gears + rpm for engine audio / feel: rpm sawtooths inside each band.
+    const bands = [0, 7.5, 13.5, 19.5, 26];
+    const sp = Math.abs(fSpeed);
+    let gear = 0;
+    while (gear < bands.length - 1 && sp >= bands[gear + 1]) gear++;
+    const bandW = (bands[gear + 1] || 30) - bands[gear];
+    car.gear = fSpeed < -0.5 ? 0 : gear + 1;
+    car.rpm = clamp(0.28 + 0.72 * ((sp - bands[gear]) / bandW), 0.24, 1);
+    if (!input.up && !input.down) car.rpm = clamp(car.rpm - dt * 0.4, 0.22, 1);
+    let nx = car.x + car.vx * dt;
+    let nz = car.z + car.vz * dt;
     const [cx, cz] = collideBuildings(s.city, nx, nz, 1.7);
-    if ((cx !== nx || cz !== nz) && Math.abs(car.speed) > 7) {
-      damageCar(s, car, Math.abs(car.speed) * 0.7);
-      ev(s, 'crash', Math.abs(car.speed));
-      car.speed *= -0.3;
-    } else car.speed = car.speed; // no-op keep
+    if ((cx !== nx || cz !== nz) && car.velSpeed > 7) {
+      damageCar(s, car, car.velSpeed * 0.7);
+      ev(s, 'crash', car.velSpeed);
+      car.vx *= -0.3; car.vz *= -0.3;
+    }
     car.x = cx; car.z = cz;
     p.x = car.x; p.z = car.z; p.ry = car.ry;
     // Run over peds.
     for (const ped of s.peds) {
-      if (ped.state !== 'dead' && Math.abs(car.speed) > 5 && dist2(ped.x, ped.z, car.x, car.z) < 2.3 * 2.3) {
+      if (ped.state !== 'dead' && car.velSpeed > 5 && dist2(ped.x, ped.z, car.x, car.z) < 2.3 * 2.3) {
         ped.state = 'dead'; ped.t = 5;
         damageCar(s, car, 4);
         addWanted(s, 2, witnessed(s, car.x, car.z));
