@@ -17,7 +17,7 @@ import { loadProfile, saveProfile } from './game/storage.js';
 const canvas = document.getElementById('gl');
 const R = new Renderer(canvas);
 const ui = {};
-for (const id of ['hud','health','armor','cash','stars','weapon','banner','msg','minimap','speed','bustbar','bustfill','overlay','ovTitle','ovSub','mission','timer','prompt','vignette','respectfill','rank'])
+for (const id of ['hud','health','armor','cash','stars','weapon','banner','msg','minimap','speed','bustbar','bustfill','overlay','ovTitle','ovSub','ovFeat','mission','timer','prompt','vignette','respectfill','rank'])
   ui[id] = document.getElementById(id);
 const mm = ui.minimap.getContext('2d');
 

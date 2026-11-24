@@ -43,6 +43,7 @@ export function setupShotScene(s, kind) {
     p.inCar = car; p.x = car.x; p.z = car.z;
     car.rpm = 0.92;
     s.cash = 2840; s.armor = 50; s.health = 100;
+    s.radio = 1; s.respect = 340; // HUD sells it: RADIO VICE FM + RESPECT OPERATOR
     // Traffic ahead (taxi close, sedan further) + oncoming lane car.
     placeTrafficAt(s, 0, car.x, car.z + 18, 0, [0.98, 0.78, 0.15]);
     placeTrafficAt(s, 1, car.x, car.z + 38, 0, [0.85, 0.88, 0.9]);
@@ -53,7 +54,7 @@ export function setupShotScene(s, kind) {
     placePedAt(s, 1, road + 9.5, car.z + 16, false, road, 9.5);
     placePedAt(s, 2, road - 9.5, car.z + 26, false, road, -9.5);
     placePedAt(s, 3, road + 9.5, car.z + 6, false, road, 9.5);
-    s.mission = { name: 'CRUISE', desc: 'Downtown run', target: { x: car.x, z: car.z + 120, r: 6 } };
+    s.mission = { name: 'PALM TREE GRAND PRIX', desc: "Rico's midnight circuit — hit 5 checkpoints against the clock.", timer: 63, target: { x: car.x, z: car.z + 120, r: 6 } };
   }
   if (kind === 'chase') {
     const car = s.cars.find(c => c.kind === 'parked');
@@ -112,6 +113,8 @@ export function setupShotScene(s, kind) {
     car.kind = 'player'; car.x = roadC - 3.6; car.z = bestZ; car.ry = 0;
     p.inCar = car; p.x = car.x; p.z = car.z;
     car.rpm = 0.8; s.wanted = 4; s.trauma = 0.45;
+    s.radio = 2; s.respect = 720; // RADIO SOLMAR + RESPECT KINGPIN on the HUD
+    s.mission = { name: 'VICE ESCAPE', desc: "Survive the 4-star heat, then reach the Pay 'n Spray.", idx: 4, surviveT: 97, target: { x: s.city.zones.spray.x, z: s.city.zones.spray.z, r: 6 } };
     const fx = Math.sin(car.ry), fz = Math.cos(car.ry), rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
     const mkCop = (x, z, ry) => ({ id: 950 + s.cops.length, kind: 'cop', x, z, ry, speed: 12, targetSpeed: 20, hp: 120, smoke: 0, driver: true, stopped: 0, color: [0.95, 0.95, 0.97] });
     // PIT unit tucked behind (mirror / minimap dressing).
@@ -190,6 +193,7 @@ export function setupShotScene(s, kind) {
     s.banner = 'MISSION PASSED'; s.bannerColor = '#00FFCC'; s.bannerT = 999;
     s.mission = { name: 'THE RIVAL DEAL', desc: 'REWARD: $20,000', target: null };
     s.cash = 21450; s.wanted = 0;
+    s.respect = 760; s.hasSmg = true; s.weapon = 'smg'; s.ammoSmg = 28; // endgame loadout on the HUD: SMG + KINGPIN
     out.skids = [{ x: z.x - 6, z: z.z + 2, ry: Math.PI / 2, len: 10 }, { x: z.x - 11, z: z.z + 2.6, ry: Math.PI / 2, len: 8 }];
     // Celebration smoke rises off the gold car, NOT in the camera's face.
     for (let i = 0; i < 8; i++) out.puffs.push({ x: z.x + (i % 3 - 1) * 0.8, y: 1.2 + i * 0.35, z: z.z + (i % 2) * 1.2 - 0.6, vx: 0.2, vy: 0.7, vz: 0.1, life: 1.4, size: 0.3, color: [0.8, 0.8, 0.82] });

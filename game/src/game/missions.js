@@ -1,6 +1,7 @@
-// Mission chain (WO Task 11): five scripted missions + endless taxi work.
-// 1 Shoreline Grab, 2 Heat Courier, 3 Ammu-Nation Run, 4 The Rival Deal,
-// 5 Vice Escape. Taxi runs start with [T] while driving.
+// Mission chain (WO Task 11): eight scripted missions + endless taxi work.
+// 1 The Shoreline Grab, 2 Heat Courier, 3 Ammu-Nation Run, 4 The Rival Deal,
+// 5 Vice Escape, 6 Palm Tree Grand Prix, 7 Roadblock Run, 8 Night Courier.
+// Taxi runs start with [T] while driving; completion pays cash + RESPECT.
 import { dist2 } from '../rng.js';
 import { BLOCK, roadCenters } from './world.js';
 

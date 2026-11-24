@@ -95,6 +95,10 @@ export function updateHUD(s, ui, nearCarFn) {
   ui.prompt.textContent = prompt;
   const ov = { title: ['VICE BLOCKS 3D', 'PRESS ANY KEY TO HIT THE STREETS'], paused: ['PAUSED', 'Click or press Enter to resume'],
     busted: ['BUSTED', ''], wasted: ['WASTED', ''] }[s.mode];
+  if (ui.ovFeat) {
+    ui.ovFeat.style.display = s.mode === 'title' ? 'block' : 'none';
+    if (s.mode === 'title') ui.ovFeat.textContent = '8 STORY MISSIONS · 5-STAR WANTED · HELICOPTER + ROADBLOCKS · 2 RADIO STATIONS · PISTOL + SMG · RESPECT RANKS · GARAGE UPGRADES';
+  }
   if (ov) {
     ui.overlay.style.display = 'flex';
     ui.ovTitle.textContent = ov[0];
