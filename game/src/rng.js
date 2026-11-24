@@ -1,49 +1,44 @@
-// rng.js — deterministic randomness and the handful of numeric helpers
-// that every other module leans on. The core generator is mulberry32:
-// a single 32-bit word of state, advanced with an odd increment and then
-// scrambled with two imul/xorshift rounds. Because it is seeded, one seed
-// always grows the identical city, traffic layout and screenshot scene,
-// which is what makes the stills reproducible. No DOM access here.
+// rng.js — seeded randomness plus small numeric utilities shared by all
+// modules. The generator is mulberry32: one 32-bit state word, stepped by
+// an odd constant and mixed through two multiply/xorshift rounds. Seeding
+// makes cities, traffic and screenshot scenes reproducible. No DOM here.
 
 export function makeRng(seed) {
-  let word = (seed >>> 0) || 1;
-  const next = function () {
-    word = (word + 0x6D2B79F5) | 0;
-    let t = word;
+  let state = (seed >>> 0) || 1;
+  function next() {
+    state = (state + 0x6D2B79F5) | 0;
+    let t = state;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  next.range = function (lo, hi) { return lo + next() * (hi - lo); };
-  next.int = function (lo, hi) { return lo + Math.floor(next() * (hi - lo + 1)); };
-  next.pick = function (arr) { return arr[Math.floor(next() * arr.length) % arr.length]; };
-  next.chance = function (p) { return next() < p; };
+  }
+  next.range = (lo, hi) => lo + next() * (hi - lo);
+  next.int = (lo, hi) => lo + Math.floor(next() * (hi - lo + 1));
+  next.pick = (items) => items[Math.floor(next() * items.length) % items.length];
+  next.chance = (p) => next() < p;
   return next;
 }
 
-export function clamp(v, lo, hi) {
-  if (v < lo) return lo;
-  if (v > hi) return hi;
-  return v;
+export function clamp(value, lo, hi) {
+  return value < lo ? lo : value > hi ? hi : value;
 }
 
 export function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-// Ground-plane squared distance. All proximity tests in the game use
-// this form so they can compare against a squared radius and skip sqrt.
+// Squared distance on the ground plane; callers compare with squared
+// radii so most proximity checks never need a square root.
 export function dist2(ax, az, bx, bz) {
-  const dx = ax - bx;
-  const dz = az - bz;
+  const dx = ax - bx, dz = az - bz;
   return dx * dx + dz * dz;
 }
 
-// Shortest-arc interpolation between two headings, in radians.
+// Interpolate headings along the shortest arc, angles in radians.
 export function angleLerp(a, b, t) {
   const TAU = Math.PI * 2;
-  let d = (b - a) % TAU;
-  if (d > Math.PI) d -= TAU;
-  else if (d < -Math.PI) d += TAU;
-  return a + d * t;
+  let delta = (b - a) % TAU;
+  if (delta > Math.PI) delta -= TAU;
+  else if (delta < -Math.PI) delta += TAU;
+  return a + delta * t;
 }

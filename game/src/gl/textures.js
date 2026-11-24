@@ -1,78 +1,63 @@
-// textures.js — there are no image files in this game. Every texture
-// is painted onto a 2D canvas at boot: four pastel Art Deco facades, a
-// fifth late-dusk facade with many lit windows (swapped in for the
-// chase scene), asphalt, sidewalk pavers, the radial spotlight pool,
-// a soft particle sprite, and the cockpit gauge cluster face.
+// textures.js — no image files ship with the game. Each texture is
+// painted on a 2D canvas at startup: four pastel Deco facades, a fifth
+// dusk facade with many lit windows for the chase scene, asphalt,
+// sidewalk pavers, a radial spotlight pool, a soft particle sprite and
+// the cockpit gauge-cluster face.
 
-function uploadTexture(gl, canvas, repeat) {
+function upload(gl, canvas, repeat) {
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  const wrapMode = repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE;
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapMode);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapMode);
+  const wrap = repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE;
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
   return tex;
 }
 
-function blankCanvas(w, h) {
+function newCanvas(w, h) {
   const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
+  c.width = w; c.height = h;
   return c;
 }
 
-// A tiny deterministic LCG: facade window patterns must come out the
-// same on every boot, or screenshots would reshuffle between runs.
+// Deterministic LCG so facade window patterns are identical every boot
+// and screenshots stay reproducible.
 function lcg(seed) {
   let s = seed;
-  return function () {
-    s = (s * 16807) % 2147483647;
-    return s / 2147483647;
-  };
+  return () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
 }
 
-const WARM = ['#ffd98a', '#ffb36b', '#ffe9bb'];
-const COOL = ['#cfe9ff', '#9fd8ff'];
+const WARM_TONES = ['#ffd98a', '#ffb36b', '#ffe9bb'];
+const COOL_TONES = ['#cfe9ff', '#9fd8ff'];
 
-// One facade: flat pastel wall, then a window grid where each cell is
-// warm-lit, cool-lit, or dark glass according to rolled thresholds.
-function facadeCanvas(wallColor, seed, warmP, coolP, darkColor) {
-  const c = blankCanvas(128, 256);
+// One facade: flat pastel wall, then a grid whose cells roll warm-lit,
+// cool-lit or dark according to the supplied probabilities.
+function facade(wallColor, seed, warmP, coolP, darkColor) {
+  const c = newCanvas(128, 256);
   const g = c.getContext('2d');
-  g.fillStyle = wallColor;
-  g.fillRect(0, 0, 128, 256);
+  g.fillStyle = wallColor; g.fillRect(0, 0, 128, 256);
   const rnd = lcg(seed);
-  for (let y = 10; y < 246; y += 21) {
-    for (let x = 10; x < 118; x += 21) {
-      const roll = rnd();
-      if (roll < warmP) g.fillStyle = WARM[Math.floor(rnd() * WARM.length)];
-      else if (roll < warmP + coolP) g.fillStyle = COOL[Math.floor(rnd() * COOL.length)];
-      else g.fillStyle = darkColor;
-      g.fillRect(x, y, 11, 12);
-    }
+  for (let y = 10; y < 246; y += 21) for (let x = 10; x < 118; x += 21) {
+    const roll = rnd();
+    if (roll < warmP) g.fillStyle = WARM_TONES[Math.floor(rnd() * WARM_TONES.length)];
+    else if (roll < warmP + coolP) g.fillStyle = COOL_TONES[Math.floor(rnd() * COOL_TONES.length)];
+    else g.fillStyle = darkColor;
+    g.fillRect(x, y, 11, 12);
   }
   return c;
 }
 
-// The two-gauge cluster face. The canvas is painted pre-flipped
-// vertically, because texture upload here never sets FLIP_Y; without
-// the flip the gauge labels would come out mirrored in the cockpit.
+// Gauge-cluster face. It is painted pre-flipped vertically because the
+// upload path never sets FLIP_Y; otherwise labels would mirror.
 function paintCluster(g, needles) {
-  g.fillStyle = '#0a0a0e';
-  g.fillRect(0, 0, 256, 128);
-  g.save();
-  g.translate(0, 128);
-  g.scale(1, -1);
+  g.fillStyle = '#0a0a0e'; g.fillRect(0, 0, 256, 128);
+  g.save(); g.translate(0, 128); g.scale(1, -1);
   const gauge = (cx, label, frac) => {
-    g.strokeStyle = '#2a2f3a';
-    g.lineWidth = 5;
-    g.beginPath();
-    g.arc(cx, 64, 46, 0, Math.PI * 2);
-    g.stroke();
-    g.strokeStyle = '#ffb36b';
-    g.lineWidth = 2;
+    g.strokeStyle = '#2a2f3a'; g.lineWidth = 5;
+    g.beginPath(); g.arc(cx, 64, 46, 0, Math.PI * 2); g.stroke();
+    g.strokeStyle = '#ffb36b'; g.lineWidth = 2;
     for (let i = 0; i <= 10; i++) {
       const a = Math.PI * 0.75 + (i * Math.PI * 1.5) / 10;
       g.beginPath();
@@ -82,16 +67,11 @@ function paintCluster(g, needles) {
     }
     if (frac != null) {
       const na = Math.PI * 0.75 + Math.min(1, frac) * Math.PI * 1.5;
-      g.strokeStyle = '#ff7b3c';
-      g.lineWidth = 3;
-      g.beginPath();
-      g.moveTo(cx, 64);
-      g.lineTo(cx + Math.cos(na) * 40, 64 + Math.sin(na) * 40);
-      g.stroke();
+      g.strokeStyle = '#ff7b3c'; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(cx, 64);
+      g.lineTo(cx + Math.cos(na) * 40, 64 + Math.sin(na) * 40); g.stroke();
     }
-    g.fillStyle = '#ffe1b8';
-    g.font = 'bold 11px monospace';
-    g.textAlign = 'center';
+    g.fillStyle = '#ffe1b8'; g.font = 'bold 11px monospace'; g.textAlign = 'center';
     g.fillText(label, cx, 100);
   };
   gauge(64, 'MPH', needles ? needles[0] : null);
@@ -101,7 +81,6 @@ function paintCluster(g, needles) {
 
 export function makeTextures(gl) {
   const out = {};
-
   const daylight = [
     { wall: '#f2ede2', seed: 1234 },
     { wall: '#f6cf9f', seed: 555 + 777 },
@@ -109,81 +88,57 @@ export function makeTextures(gl) {
     { wall: '#f4c3d2', seed: 313 + 2331 },
   ];
   daylight.forEach((entry, i) => {
-    out['b' + i] = uploadTexture(gl, facadeCanvas(entry.wall, entry.seed, 0.30, 0, '#46545e'), true);
+    out['b' + i] = upload(gl, facade(entry.wall, entry.seed, 0.30, 0, '#46545e'), true);
   });
-
-  // Late-dusk facade: blue-grey walls, about half the windows lit.
-  out.b4 = uploadTexture(gl, facadeCanvas('#8a94ac', 4242, 0.34, 0.14, '#232a36'), true);
-
-  // Spotlight pool: bright core falling to black, drawn additively.
+  out.b4 = upload(gl, facade('#8a94ac', 4242, 0.34, 0.14, '#232a36'), true);
   {
-    const c = blankCanvas(128, 128);
-    const g = c.getContext('2d');
+    const c = newCanvas(128, 128), g = c.getContext('2d');
     const grad = g.createRadialGradient(64, 64, 4, 64, 64, 64);
-    grad.addColorStop(0, '#fffbe8');
-    grad.addColorStop(0.45, '#c9bd96');
-    grad.addColorStop(1, '#000000');
-    g.fillStyle = grad;
-    g.fillRect(0, 0, 128, 128);
-    out.pool = uploadTexture(gl, c, false);
+    grad.addColorStop(0, '#fffbe8'); grad.addColorStop(0.45, '#c9bd96'); grad.addColorStop(1, '#000000');
+    g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+    out.pool = upload(gl, c, false);
   }
-
-  // Asphalt: warm mid grey flecked with thousands of grain specks.
   {
-    const c = blankCanvas(256, 256);
-    const g = c.getContext('2d');
-    g.fillStyle = '#5b5751';
-    g.fillRect(0, 0, 256, 256);
+    const c = newCanvas(256, 256), g = c.getContext('2d');
+    g.fillStyle = '#5b5751'; g.fillRect(0, 0, 256, 256);
     const rnd = lcg(42);
     for (let i = 0; i < 5200; i++) {
       g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.16)';
       g.fillRect(rnd() * 256, rnd() * 256, 1.6, 1.6);
     }
-    out.road = uploadTexture(gl, c, true);
+    out.road = upload(gl, c, true);
   }
-
-  // Sidewalk: sand-coloured pavers on a 32 px grid.
   {
-    const c = blankCanvas(128, 128);
-    const g = c.getContext('2d');
-    g.fillStyle = '#cfc0a0';
-    g.fillRect(0, 0, 128, 128);
-    g.strokeStyle = '#b3a184';
-    g.lineWidth = 3;
+    const c = newCanvas(128, 128), g = c.getContext('2d');
+    g.fillStyle = '#cfc0a0'; g.fillRect(0, 0, 128, 128);
+    g.strokeStyle = '#b3a184'; g.lineWidth = 3;
     for (let i = 0; i <= 128; i += 32) {
       g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 128); g.stroke();
       g.beginPath(); g.moveTo(0, i); g.lineTo(128, i); g.stroke();
     }
-    out.walk = uploadTexture(gl, c, true);
+    out.walk = upload(gl, c, true);
   }
-
-  // The static cluster face; needles are repainted live while driving.
   {
-    const c = blankCanvas(256, 128);
+    const c = newCanvas(256, 128);
     paintCluster(c.getContext('2d'), null);
-    out.dash = uploadTexture(gl, c, false);
+    out.dash = upload(gl, c, false);
   }
-
-  // Soft round sprite for particles.
   {
-    const c = blankCanvas(64, 64);
-    const g = c.getContext('2d');
+    const c = newCanvas(64, 64), g = c.getContext('2d');
     const grad = g.createRadialGradient(32, 32, 2, 32, 32, 31);
     grad.addColorStop(0, 'rgba(255,255,255,0.9)');
     grad.addColorStop(0.55, 'rgba(255,255,255,0.35)');
     grad.addColorStop(1, 'rgba(255,255,255,0)');
-    g.fillStyle = grad;
-    g.fillRect(0, 0, 64, 64);
-    out.particle = uploadTexture(gl, c, false);
+    g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+    out.particle = upload(gl, c, false);
   }
-
   return out;
 }
 
-// Repaint the cluster with live needle positions and re-upload it.
-// Runs a few times a second while driving; the scratch canvas is kept.
+// Repaint the cluster with live needles and re-upload; runs a few times
+// per second while driving, reusing one scratch canvas.
 export function drawDashTexture(gl, tex, mph, rpm) {
-  if (!drawDashTexture.scratch) drawDashTexture.scratch = blankCanvas(256, 128);
+  if (!drawDashTexture.scratch) drawDashTexture.scratch = newCanvas(256, 128);
   const c = drawDashTexture.scratch;
   paintCluster(c.getContext('2d'), [mph / 120, rpm]);
   gl.bindTexture(gl.TEXTURE_2D, tex);
