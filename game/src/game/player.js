@@ -6,6 +6,21 @@ import { VehiclePhysics } from './physics.js';
 import { damageCar } from './traffic.js';
 import { witnessed } from './wanted.js';
 
+// Four-weapon arsenal. One shared reserve pool; each weapon has its own
+// magazine, cadence, spread, pellet count and car damage. Keys 1-4 switch.
+export const WEAPONS = {
+  pistol:  { label: 'PISTOL',  short: '9MM', mag: 'ammo',        size: 12, cd: 0.25, auto: false, spread: 1.2, carDmg: 18, range: 50, pellets: 1, price: 300 },
+  smg:     { label: 'SMG',     short: 'SMG', mag: 'ammoSmg',     size: 30, cd: 0.09, auto: true,  spread: 2.8, carDmg: 9,  range: 50, pellets: 1, price: 600 },
+  shotgun: { label: 'SHOTGUN', short: '12G', mag: 'ammoShotgun', size: 6,  cd: 0.85, auto: false, spread: 3.6, carDmg: 11, range: 32, pellets: 6, price: 800 },
+  rifle:   { label: 'RIFLE',   short: 'AR',  mag: 'ammoRifle',   size: 25, cd: 0.13, auto: true,  spread: 0.7, carDmg: 22, range: 70, pellets: 1, price: 1000 },
+};
+export const WEAPON_ORDER = ['pistol', 'smg', 'shotgun', 'rifle'];
+export function ownsWeapon(s, w) {
+  return w === 'pistol' ? s.hasGun : w === 'smg' ? s.hasSmg : w === 'shotgun' ? s.hasShotgun : s.hasRifle;
+}
+export function activeWeapon(s) { return ownsWeapon(s, s.weapon) ? s.weapon : 'pistol'; }
+export function weaponDef(s) { return WEAPONS[activeWeapon(s)]; }
+
 export function hurt(s, dmg) {
   // Armor absorbs first (WO HUD: health + armor meters).
   const absorbed = Math.min(s.armor, dmg * 0.6);
@@ -51,47 +66,52 @@ export function enterExitCar(s) {
 
 export function shoot(s) {
   const p = s.player;
-  const smg = s.weapon === 'smg' && s.hasSmg;
-  const magKey = smg ? 'ammoSmg' : 'ammo';
-  if (!s.hasGun || p.inCar || s[magKey] <= 0) { if (s[magKey] <= 0 && s.hasGun) s.events.push({ name: 'dryFire' }); return; }
-  s[magKey]--;
-  const spread = smg ? 2.8 : 1.2;   // SMG: full-auto scatter
-  const carDmg = smg ? 9 : 18;
-  s.recoil = 1; // viewmodel slide kick, spring recovery in camera/render
+  const wk = activeWeapon(s), W = WEAPONS[wk];
+  if (!s.hasGun || p.inCar) return;
+  if (s[W.mag] <= 0) { s.events.push({ name: 'dryFire' }); return; }
+  s[W.mag]--;
+  s.recoil = 1; s.flashT = 0.07; // viewmodel kick + muzzle flash frames
   s.gunfireT = 0.6; s.gunfireX = p.x; s.gunfireZ = p.z;
-  s.events.push({ name: 'shot' });
+  s.events.push({ name: 'shot', data: wk });
   const fx = Math.sin(p.ry), fz = Math.cos(p.ry);
-  let hit = null, hd = 50;
-  for (const ped of s.peds) {
-    const dx = ped.x - p.x, dz = ped.z - p.z;
-    const along = dx * fx + dz * fz;
-    if (along > 0 && along < hd && Math.abs(dx * fz - dz * fx) < spread) { hit = ped; hd = along; }
-  }
-  // Mission training targets (Ammu-Nation Run).
-  for (const tg of s.targets || []) {
-    const dx = tg.x - p.x, dz = tg.z - p.z;
-    const along = dx * fx + dz * fz;
-    if (along > 0 && along < hd && Math.abs(dx * fz - dz * fx) < 1.4 && !tg.down) {
-      tg.down = true; s.events.push({ name: 'targetDown', data: tg });
-      return;
+  let hitAny = false, pedKilled = false, copCarHit = false;
+  for (let pel = 0; pel < W.pellets; pel++) {
+    const jit = W.pellets > 1 ? (Math.random() * 2 - 1) * W.spread : 0;
+    const latTol = W.pellets > 1 ? 1.15 : W.spread;
+    let hit = null, hd = W.range;
+    for (const ped of s.peds) {
+      if (ped.state === 'dead') continue;
+      const dx = ped.x - p.x, dz = ped.z - p.z;
+      const along = dx * fx + dz * fz;
+      if (along > 0 && along < hd && Math.abs(dx * fz - dz * fx - jit) < latTol) { hit = ped; hd = along; }
+    }
+    // Mission training targets (Ammu-Nation Run).
+    let hitTarget = false;
+    for (const tg of s.targets || []) {
+      const dx = tg.x - p.x, dz = tg.z - p.z;
+      const along = dx * fx + dz * fz;
+      if (along > 0 && along < hd && Math.abs(dx * fz - dz * fx - jit) < 1.4 && !tg.down) { tg.down = true; hitTarget = true; hd = along; }
+    }
+    if (hitTarget) { s.events.push({ name: 'targetDown', data: null }); hitAny = true; continue; }
+    if (hit) {
+      hit.state = 'dead'; hit.t = 4; hitAny = true; pedKilled = true;
+      s.events.push({ name: 'hitPed' });
+      continue;
+    }
+    for (const c of [...s.cars, ...s.cops]) {
+      const dx = c.x - p.x, dz = c.z - p.z;
+      const along = dx * fx + dz * fz;
+      if (along > 0 && along < W.range * 0.84 && Math.abs(dx * fz - dz * fx - jit) < 2.2) {
+        damageCar(s, c, W.carDmg);
+        if (c.kind === 'cop') copCarHit = true;
+        hitAny = true;
+        break;
+      }
     }
   }
-  if (hit) {
-    hit.state = 'dead'; hit.t = 4;
-    s.wantedAPI.add(s, 3, witnessed(s, p.x, p.z));
-    s.events.push({ name: 'hitPed' });
-    return;
-  }
-  for (const c of [...s.cars, ...s.cops]) {
-    const dx = c.x - p.x, dz = c.z - p.z;
-    const along = dx * fx + dz * fz;
-    if (along > 0 && along < 42 && Math.abs(dx * fz - dz * fx) < 2.2) {
-      damageCar(s, c, carDmg);
-      if (c.kind === 'cop') s.wantedAPI.add(s, Math.max(3, s.wanted), true);
-      return;
-    }
-  }
-  s.wantedAPI.add(s, 1, witnessed(s, p.x, p.z));
+  if (pedKilled) s.wantedAPI.add(s, 3, witnessed(s, p.x, p.z));
+  else if (copCarHit) s.wantedAPI.add(s, Math.max(3, s.wanted), true);
+  else if (!hitAny) s.wantedAPI.add(s, 1, witnessed(s, p.x, p.z));
 }
 
 export function stepPlayerCar(s, input, dt) {
@@ -209,6 +229,10 @@ export function stepPlayerFoot(s, input, dt) {
     else if (!s.hasGun) { s.msg = 'PISTOL $300 — NOT ENOUGH CASH'; s.msgT = 2; }
     else if (!s.hasSmg && s.cash >= 600) { s.cash -= 600; s.hasSmg = true; s.ammoSmg = 30; s.weapon = 'smg'; s.msg = 'SMG PURCHASED — KEYS 1/2 SWITCH'; s.msgT = 2.5; s.events.push({ name: 'buyGun' }); s.events.push({ name: 'save' }); }
     else if (!s.hasSmg) { s.msg = 'SMG $600 — NOT ENOUGH CASH'; s.msgT = 2; }
+    else if (!s.hasShotgun && s.cash >= 800) { s.cash -= 800; s.hasShotgun = true; s.ammoShotgun = 6; s.weapon = 'shotgun'; s.msg = 'SHOTGUN PURCHASED — KEYS 1-4 SWITCH'; s.msgT = 2.5; s.events.push({ name: 'buyGun' }); s.events.push({ name: 'save' }); }
+    else if (!s.hasShotgun) { s.msg = 'SHOTGUN $800 — NOT ENOUGH CASH'; s.msgT = 2; }
+    else if (!s.hasRifle && s.cash >= 1000) { s.cash -= 1000; s.hasRifle = true; s.ammoRifle = 25; s.weapon = 'rifle'; s.msg = 'RIFLE PURCHASED — KEYS 1-4 SWITCH'; s.msgT = 2.5; s.events.push({ name: 'buyGun' }); s.events.push({ name: 'save' }); }
+    else if (!s.hasRifle) { s.msg = 'RIFLE $1000 — NOT ENOUGH CASH'; s.msgT = 2; }
     else if (s.reserve < 240) { s.reserve = 240; s.msg = 'AMMO RESTOCKED'; s.msgT = 1.5; }
   }
   if (inZone(zones.hospital) && s.health < 100) s.health = Math.min(100, s.health + 22 * dt);

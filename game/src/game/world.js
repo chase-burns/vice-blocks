@@ -8,6 +8,18 @@ export const ROAD = 15;
 export const GRID = 5;
 export const CITY_HALF = (GRID * BLOCK) / 2 + BLOCK;
 
+// Named districts, derived from position — shown on the HUD so every street
+// has an identity (and the minimap's coloured zones get names to match).
+export function districtAt(city, x, z) {
+  const hz = city.zones.harbor;
+  if ((x - hz.x) ** 2 + (z - hz.z) ** 2 < 34 * 34) return 'THE HARBOR';
+  if (x > 55) return 'OCEAN DRIVE';
+  if (z < -55) return 'SOLMAR BAY';
+  if (x < -55) return 'PALM HEIGHTS';
+  if (z > 55) return 'NORTH BEACH';
+  return 'DOWNTOWN';
+}
+
 export function roadCenters() {
   const out = [];
   for (let i = 0; i <= GRID; i++) out.push(-GRID * BLOCK / 2 + i * BLOCK);

@@ -18,6 +18,7 @@ export function createState(seed, saved) {
     events: [], stats: { stolen: 0, earned: 0 },
     health: 100, armor: 0, cash: 80, hasGun: false, ammo: 12, reserve: 240, reloadT: 0,
     hasSmg: false, weapon: 'pistol', ammoSmg: 0, fireCd: 0,
+    hasShotgun: false, ammoShotgun: 0, hasRifle: false, ammoRifle: 0, flashT: 0,
     respect: 0, radio: 0, armorUp: false, engineUp: false, heli: null,
     wanted: 0, crimeHeat: 0, bustTimer: 0, pendingStars: null, dispatchT: 0, wantedDecay: 0,
     missionIdx: 0, mission: null, taxi: null, boss: null,
@@ -41,6 +42,9 @@ export function createState(seed, saved) {
     if (typeof saved.missionIdx === 'number') s.missionIdx = clamp(saved.missionIdx, 0, 8);
     s.hasGun = !!saved.hasGun;
     s.hasSmg = !!saved.hasSmg; if (s.hasSmg) s.ammoSmg = 30;
+    s.hasShotgun = !!saved.hasShotgun; if (s.hasShotgun) s.ammoShotgun = 6;
+    s.hasRifle = !!saved.hasRifle; if (s.hasRifle) s.ammoRifle = 25;
+    if (saved.weapon && player.ownsWeapon(s, saved.weapon)) s.weapon = saved.weapon;
     s.respect = saved.respect || 0;
     s.armorUp = !!saved.armorUp; s.engineUp = !!saved.engineUp;
     if (typeof saved.armor === 'number') s.armor = saved.armor;
@@ -121,8 +125,8 @@ export function step(s, input, dt) {
   if (p.inCar) player.stepPlayerCar(s, input, dt);
   else player.stepPlayerFoot(s, input, dt);
   player.stepZonesCar(s, dt);
-  const magKey = s.weapon === 'smg' && s.hasSmg ? 'ammoSmg' : 'ammo';
-  const magSize = magKey === 'ammoSmg' ? 30 : 12;
+  const magKey = player.WEAPONS[player.activeWeapon(s)].mag;
+  const magSize = player.WEAPONS[player.activeWeapon(s)].size;
   if (s.reloadT > 0) {
     s.reloadT -= dt;
     if (s.reloadT <= 0 && s.reserve > 0) {
@@ -132,6 +136,7 @@ export function step(s, input, dt) {
   }
   if (input.reload && s.hasGun && s[magKey] < magSize && s.reserve > 0 && s.reloadT <= 0) s.reloadT = 0.9;
   s.fireCd = Math.max(0, (s.fireCd || 0) - dt);
+  s.flashT = Math.max(0, (s.flashT || 0) - dt);
   processBurning(s, dt);
   for (const c of s.cars) if (c !== p.inCar && (c.kind === 'traffic')) stepTrafficCar(s, c, dt);
   for (const ped of s.peds) stepPed(s, ped, dt);

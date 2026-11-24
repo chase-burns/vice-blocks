@@ -1,6 +1,7 @@
 // HUD (WO Task 12): DOM dashboard (cash ticker, gold stars, health/armor
 // meters, LCD speedometer in MPH, ammo) + rotating circular minimap canvas.
-import { roadCenters, CITY_HALF } from './world.js';
+import { roadCenters, CITY_HALF, districtAt } from './world.js';
+import { WEAPONS, WEAPON_ORDER, ownsWeapon, activeWeapon } from './player.js';
 
 export function mph(ms) { return Math.round(Math.abs(ms) * 2.23694); }
 
@@ -47,7 +48,7 @@ export function drawMinimap(s, mm) {
 
 export function updateHUD(s, ui, nearCarFn) {
   const playing = s.mode === 'play' || s.mode === 'paused';
-  ui.hud.style.display = (playing || s.shotMode) ? 'block' : 'none';
+  ui.hud.style.display = (playing || (s.shotMode && s.mode !== 'title')) ? 'block' : 'none';
   ui.health.style.width = Math.max(0, s.health) + '%';
   ui.armor.style.width = Math.max(0, s.armor) + '%';
   ui.cash.textContent = '$' + String(Math.max(0, s.cash)).padStart(7, '0');
@@ -58,7 +59,44 @@ export function updateHUD(s, ui, nearCarFn) {
   ui.stars.style.textShadow = s.wanted ? '0 0 10px rgba(255,215,0,.9)' : 'none';
   const car = s.player.inCar;
   ui.weapon.textContent = car ? `GEAR ${car.gear === 0 ? 'R' : (car.gear == null ? 'N' : car.gear)} · ${car.isDrifting ? 'DRIFT!' : ''}${s.radio ? ` · RADIO ${s.radio === 1 ? 'VICE FM' : 'SOLMAR'}` : ''}`
-    : (s.hasGun ? (s.weapon === 'smg' && s.hasSmg ? `SMG ${s.ammoSmg} / ${s.reserve}` : `PISTOL ${s.ammo} / ${s.reserve}`) + (s.reloadT > 0 ? ' · RELOADING' : '') : 'UNARMED');
+    : (s.hasGun ? `${WEAPONS[activeWeapon(s)].label} ${s[WEAPONS[activeWeapon(s)].mag]} / ${s.reserve}` + (s.reloadT > 0 ? ' · RELOADING' : '') : 'UNARMED');
+  // Weapon-slot chips: the whole arsenal, owned lit, current gold, locked dim.
+  if (ui.slots) {
+    const show = s.hasGun && (playing || s.shotMode);
+    ui.slots.style.display = show ? 'flex' : 'none';
+    if (show) {
+      const html = WEAPON_ORDER.map((w, i) => {
+        const owned = ownsWeapon(s, w), cur = activeWeapon(s) === w && !car;
+        const st = cur ? 'border:1px solid #ffd94f;color:#ffd94f;background:rgba(30,22,4,.72)'
+          : owned ? 'border:1px solid rgba(255,255,255,.5);color:#fff;background:rgba(10,6,16,.6)'
+          : 'border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.35);background:rgba(10,6,16,.45)';
+        return `<div style="${st};border-radius:6px;padding:4px 8px;font-size:11.5px;font-weight:800;letter-spacing:1px;text-shadow:0 1px 0 #000">${i + 1} ${WEAPONS[w].short}</div>`;
+      }).join('');
+      if (ui.slots._h !== html) { ui.slots.innerHTML = html; ui.slots._h = html; }
+    }
+  }
+  // SBPD dispatch board: who is coming for you, named like a real response.
+  if (ui.dispatch) {
+    const units = [];
+    if (s.heli) units.push('▲ KESTREL-1 · AIR SUPPORT');
+    for (const c of s.cops) {
+      if (c.kind !== 'cop') continue;
+      const d = Math.round(Math.hypot(c.x - s.player.x, c.z - s.player.z));
+      units.push(c.roadblock ? `■ ROADBLOCK · ${d}m` : `${units.length % 2 ? '◆' : '●'} ${c.roadblock ? '' : (Math.abs(c.z - s.player.z) > Math.abs(c.x - s.player.x) ? 'PIT UNIT' : 'PATROL')} · ${d}m`);
+    }
+    const showD = s.wanted > 0 && (playing || s.shotMode) && units.length > 0;
+    ui.dispatch.style.display = showD ? 'block' : 'none';
+    if (showD) {
+      const rows = units.slice(0, 5).join('<br>') + (units.length > 5 ? `<br>+${units.length - 5} more` : '');
+      const html = `<span class="dhead">SBPD DISPATCH · ${units.length} UNITS</span><br>${rows}`;
+      if (ui.dispatch._h !== html) { ui.dispatch.innerHTML = html; ui.dispatch._h = html; }
+    }
+  }
+  // District label: where in the city you are right now.
+  if (ui.district) {
+    const dn = (playing || s.shotMode) ? districtAt(s.city, s.player.x, s.player.z) : '';
+    if (ui.district._t !== dn) { ui.district.textContent = dn; ui.district._t = dn; }
+  }
   if (ui.respectfill) {
     const r = s.respect || 0;
     ui.respectfill.style.width = Math.min(100, (r % 300) / 3) + '%';
@@ -84,7 +122,10 @@ export function updateHUD(s, ui, nearCarFn) {
     else {
       const zz = s.city.zones;
       const d2 = (a) => (s.player.x - a.x) ** 2 + (s.player.z - a.z) ** 2;
-      if (d2(zz.gunshop) < zz.gunshop.r * zz.gunshop.r) prompt = s.hasGun ? 'AMMU-NATION — E RESTOCKS AMMO' : 'E — BUY PISTOL $300';
+      if (d2(zz.gunshop) < zz.gunshop.r * zz.gunshop.r) {
+        const next = WEAPON_ORDER.find(w => !ownsWeapon(s, w));
+        prompt = next ? `AMMU-NATION — E BUY ${WEAPONS[next].label} $${WEAPONS[next].price}` : 'AMMU-NATION — E RESTOCKS AMMO';
+      }
       else if (d2(zz.hospital) < zz.hospital.r * zz.hospital.r) prompt = 'HOSPITAL — HEALING…';
     }
   } else if (playing && car) {
@@ -97,7 +138,17 @@ export function updateHUD(s, ui, nearCarFn) {
     busted: ['BUSTED', ''], wasted: ['WASTED', ''] }[s.mode];
   if (ui.ovFeat) {
     ui.ovFeat.style.display = s.mode === 'title' ? 'block' : 'none';
-    if (s.mode === 'title') ui.ovFeat.textContent = '8 STORY MISSIONS · 5-STAR WANTED · HELICOPTER + ROADBLOCKS · 2 RADIO STATIONS · PISTOL + SMG · RESPECT RANKS · GARAGE UPGRADES';
+    if (s.mode === 'title') ui.ovFeat.textContent = '8 STORY MISSIONS · 5-STAR WANTED · HELICOPTER + ROADBLOCKS · 2 RADIO STATIONS · 4 WEAPONS · RESPECT RANKS · GARAGE UPGRADES';
+  }
+  if (ui.ovSave) {
+    ui.ovSave.style.display = s.mode === 'title' ? 'block' : 'none';
+    if (s.mode === 'title') {
+      const nw = WEAPON_ORDER.filter(w => ownsWeapon(s, w)).length;
+      const rk = (s.respect || 0) >= 700 ? 'KINGPIN' : (s.respect || 0) >= 300 ? 'OPERATOR' : 'RUNNER';
+      ui.ovSave.textContent = s.missionIdx > 0
+        ? `CONTINUE — MISSIONS ${s.missionIdx}/8 · $${s.cash} · RESPECT ${rk} · ${nw} WEAPON${nw === 1 ? '' : 'S'}`
+        : 'NEW GAME — 8 MISSIONS AHEAD';
+    }
   }
   if (ov) {
     ui.overlay.style.display = 'flex';

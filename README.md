@@ -10,13 +10,13 @@ Vice Blocks 3D is a real-3D, first-person open-world crime game that plays offli
 
 - **First-person everything** — cockpit driving (steering wheel synced to your input, live dash gauges, FOV punch, drift smoke and skid marks) and on-foot gunplay with aim/reload
 - **8 story missions** — car theft, checkpoint couriers, a rival-deal holdup, a 4-star survival escape, a midnight grand prix, a roadblock run and a stealth night courier — plus endless taxi jobs
-- **5-star wanted system** — witness-based star gain, dispatch delay, PIT chases, bust meter, breakable 4-star roadblocks (marked on the minimap) and a 5-star police helicopter with a player-locked spotlight
+- **5-star wanted system** — witness-based star gain, dispatch delay, PIT chases, bust meter, breakable 4-star roadblocks (marked on the minimap) and a 5-star police helicopter with a player-locked spotlight — all narrated live by the **SBPD dispatch board** on the HUD, which names every responding unit (patrol, PIT, roadblock, and the KESTREL-1 air unit)
 - **Burn-and-explode vehicle chain** — wrecks smoke, burn and detonate with radial damage
-- **Two weapons** — pistol and full-auto SMG with spread, recoil and reloads
+- **Four weapons** — pistol, full-auto SMG, pump shotgun (6-pellet spread) and assault rifle, each with its own magazine, cadence and damage model, bought in a chain at Ammu-Nation and switched on keys 1–4, with the full arsenal shown as HUD slot chips
 - **RESPECT ranks** — Runner / Operator / Kingpin, earned from missions and clean getaways
 - **Pay 'n Spray garage upgrades** — armour (+50% hull) and engine (+15% power), on top of the classic $100 star-clearing respray
 - **Two procedural radio stations** — Vice FM and Solmar, synthesised live in WebAudio alongside engine, siren and gunshot sound
-- **A living city** — lane-following traffic, fleeing pedestrians, four modelled car styles (sport / sedan / taxi / police), pastel dusk lighting, minimap with cops, roadblocks, heli and mission markers
+- **A living city** — lane-following traffic, fleeing pedestrians, four modelled car styles (sport / sedan / taxi / police), pastel dusk lighting, named districts on the HUD (Downtown, Ocean Drive, Solmar Bay, Palm Heights, North Beach, The Harbor), minimap with cops, roadblocks, heli and mission markers
 
 ## Run it
 

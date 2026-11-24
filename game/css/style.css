@@ -36,6 +36,11 @@ body::after {
 #ovTitle { font-size: 74px; font-weight: 900; font-style: italic; letter-spacing: 2px; color: #ffffff; text-shadow: 0 4px 0 rgba(70,35,0,.55), 0 0 44px rgba(255,150,70,.8), 3px 3px 0 #ff8c42; animation: bannerPulse 1.2s ease-in-out infinite alternate; }
 #ovSub { margin-top: 14px; font-size: 20px; color: #ffe9a8; text-shadow: 0 1px 0 #000; letter-spacing: 2px; }
 #ovFeat { display: none; margin-top: 20px; max-width: 880px; font-size: 13px; line-height: 2.0; text-align: center; color: #a8e6f0; text-shadow: 0 1px 0 #000; letter-spacing: 3px; }
+#ovSave { display: none; margin-top: 10px; font-size: 15px; font-weight: 700; color: #ffe9a8; text-shadow: 0 1px 0 #000; letter-spacing: 2px; }
+#dispatch { position: absolute; top: 118px; right: 20px; width: 224px; display: none; background: rgba(10,6,16,.58); border: 1px solid rgba(120,170,255,.45); border-radius: 8px; padding: 8px 11px; font-size: 12.5px; line-height: 1.65; color: #dceaff; text-shadow: 0 1px 0 #000; }
+#dispatch .dhead { color: #8fc2ff; font-weight: 800; letter-spacing: 1.5px; }
+#slots { position: absolute; right: 20px; bottom: 118px; display: none; gap: 6px; }
+#district { position: absolute; left: 18px; bottom: 196px; font-size: 15px; font-weight: 800; letter-spacing: 2.5px; color: #ffd98a; text-shadow: 0 1px 0 #000, 0 0 10px rgba(255,170,60,.35); }
 #help { position: fixed; left: 18px; bottom: 200px; font-size: 13px; line-height: 1.65; color: rgba(255,255,255,.62); text-shadow: 0 1px 0 #000; z-index: 15; pointer-events: none; }
 #respectWrap { position: absolute; top: 52px; right: 20px; width: 150px; height: 7px; background: rgba(10,6,16,.55); border: 1px solid rgba(255,255,255,.4); }
 #respectfill { height: 100%; width: 0%; background: linear-gradient(90deg, #ffb36b, #ff7b3c); }

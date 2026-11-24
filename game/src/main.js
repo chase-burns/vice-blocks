@@ -7,7 +7,7 @@ import { clamp, dist2 } from './rng.js';
 import { BLOCK, ROAD, CITY_HALF, roadCenters } from './game/world.js';
 import { createState, step, drainEvents } from './game/state.js';
 import { setupShotScene } from './game/shots.js';
-import { enterExitCar, shoot, respawn } from './game/player.js';
+import { enterExitCar, shoot, respawn, weaponDef } from './game/player.js';
 import { startMission, startTaxi } from './game/missions.js';
 import { CameraRig, viewDir } from './game/camera.js';
 import { AudioEngine } from './game/audio.js';
@@ -17,7 +17,7 @@ import { loadProfile, saveProfile } from './game/storage.js';
 const canvas = document.getElementById('gl');
 const R = new Renderer(canvas);
 const ui = {};
-for (const id of ['hud','health','armor','cash','stars','weapon','banner','msg','minimap','speed','bustbar','bustfill','overlay','ovTitle','ovSub','ovFeat','mission','timer','prompt','vignette','respectfill','rank'])
+for (const id of ['hud','health','armor','cash','stars','weapon','banner','msg','minimap','speed','bustbar','bustfill','overlay','ovTitle','ovSub','ovFeat','ovSave','mission','dispatch','slots','district','timer','prompt','vignette','respectfill','rank'])
   ui[id] = document.getElementById(id);
 const mm = ui.minimap.getContext('2d');
 
@@ -286,10 +286,25 @@ function drawGunView(s, eye, viewYaw, viewPitch, lowered = false) {
   const rx = -Math.cos(viewYaw), rz = Math.sin(viewYaw); // true screen-right for this view basis
   const aim = s.player.aim && !lowered;
   const kick = (s.recoil || 0) * 0.03;
-  const rOff = aim ? 0 : 0.23, dOff = (aim ? 0.42 : 0.58) - kick, yOff = lowered ? -0.5 : (aim ? -0.145 : -0.30) + kick * 0.6;
+  const rOff = aim ? 0 : 0.23, dOff = (aim ? 0.62 : 0.58) - kick, yOff = lowered ? -0.5 : (aim ? -0.20 : -0.30) + kick * 0.6;
   const gx = eye[0] + d[0] * dOff + rx * rOff, gy = eye[1] + d[1] * dOff + yOff, gz = eye[2] + d[2] * dOff + rz * rOff;
-  R.box(gx, gy, gz, viewYaw, 0.09, 0.15, 0.46, [0.1, 0.1, 0.12], { pitch: viewPitch });
-  R.box(gx + d[0] * 0.3, gy + d[1] * 0.3 + 0.02, gz + d[2] * 0.3, viewYaw, 0.05, 0.05, 0.26, [0.16, 0.16, 0.18], { pitch: viewPitch });
+  // Per-weapon silhouette: shotgun long + thick, rifle long with a magazine,
+  // SMG compact with a long mag, pistol short.
+  const wv = s.weapon === 'shotgun' && s.hasShotgun ? { body: 0.62, bw: 0.11, barrel: 0.4, bh: 0.07, mag: 0 }
+    : s.weapon === 'rifle' && s.hasRifle ? { body: 0.58, bw: 0.08, barrel: 0.38, bh: 0.045, mag: 0.16 }
+    : s.weapon === 'smg' && s.hasSmg ? { body: 0.42, bw: 0.09, barrel: 0.22, bh: 0.05, mag: 0.19 }
+    : { body: 0.46, bw: 0.09, barrel: 0.26, bh: 0.05, mag: 0 };
+  R.box(gx, gy, gz, viewYaw, wv.bw, 0.15, wv.body, [0.1, 0.1, 0.12], { pitch: viewPitch });
+  R.box(gx + d[0] * 0.3, gy + d[1] * 0.3 + 0.02, gz + d[2] * 0.3, viewYaw, wv.bh, wv.bh, wv.barrel, [0.16, 0.16, 0.18], { pitch: viewPitch });
+  if (wv.mag) R.box(gx + d[0] * 0.05, gy - 0.13, gz + d[2] * 0.05, viewYaw, 0.06, wv.mag, 0.09, [0.13, 0.13, 0.15], { pitch: viewPitch });
+  if ((s.flashT || 0) > 0) {
+    // Muzzle flash star + a fading tracer streak down the aim line.
+    const mx = gx + d[0] * (0.3 + wv.barrel * 0.5 + 0.06), my = gy + d[1] * (0.3 + wv.barrel * 0.5) + 0.02, mz = gz + d[2] * (0.3 + wv.barrel * 0.5 + 0.06);
+    R.box(mx, my, mz, viewYaw, 0.3, 0.07, 0.07, [1, 0.8, 0.35], { pitch: viewPitch });
+    R.box(mx, my, mz, viewYaw, 0.07, 0.3, 0.07, [1, 0.8, 0.35], { pitch: viewPitch });
+    R.box(mx, my, mz, viewYaw, 0.12, 0.12, 0.12, [1, 0.98, 0.9], { pitch: viewPitch });
+    R.box(gx + d[0] * 6.4, gy + d[1] * 6.4 + 0.02, gz + d[2] * 6.4, viewYaw, 0.035, 0.035, 11.5, [1, 0.8, 0.35], { pitch: viewPitch, alpha: 0.75 });
+  }
   R.box(gx - d[0] * 0.08 + rx * 0.02, gy - 0.13, gz - d[2] * 0.08 + rz * 0.02, viewYaw, 0.15, 0.11, 0.2, [0.92, 0.76, 0.6], { pitch: viewPitch });
   if (!aim) R.box(gx - d[0] * 0.22 + rx * 0.1, gy - 0.3, gz - d[2] * 0.22 + rz * 0.1, viewYaw, 0.12, 0.12, 0.34, [0.97, 0.87, 0.72], { pitch: viewPitch + 0.5 });
 }
@@ -417,6 +432,8 @@ addEventListener('keydown', (e) => {
   }
   if (e.code === 'Digit1' && S.hasGun) S.weapon = 'pistol';
   if (e.code === 'Digit2' && S.hasSmg) S.weapon = 'smg';
+  if (e.code === 'Digit3' && S.hasShotgun) S.weapon = 'shotgun';
+  if (e.code === 'Digit4' && S.hasRifle) S.weapon = 'rifle';
   if (e.code === 'KeyP' || e.code === 'Escape') {
     if (S.mode === 'play') S.mode = 'paused';
     else if (S.mode === 'paused') S.mode = 'play';
@@ -549,8 +566,8 @@ function loop(now) {
       if (wantEnter) { enterExitCar(S); wantEnter = false; }
       if (wantTaxi) { startTaxi(S); wantTaxi = false; }
       const input = readInput();
-      if (!S.player.inCar && (wantShoot || (mouseDownL && S.weapon === 'smg' && S.hasSmg))) {
-        if ((S.fireCd || 0) <= 0) { shoot(S); S.fireCd = S.weapon === 'smg' ? 0.09 : 0.25; }
+      if (!S.player.inCar && (wantShoot || (mouseDownL && weaponDef(S).auto))) {
+        if ((S.fireCd || 0) <= 0) { shoot(S); S.fireCd = weaponDef(S).cd; }
       }
       step(S, input, dt);
       // skid marks while drifting

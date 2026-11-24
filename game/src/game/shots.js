@@ -24,6 +24,8 @@ export function setupShotScene(s, kind) {
   s.mode = 'play';
   if (kind === 'start') {
     s.mode = 'title'; s.hasGun = true;
+    // A believable mid-career save for the CONTINUE line: 5/8 missions done.
+    s.missionIdx = 5; s.cash = 12480; s.respect = 460; s.hasSmg = true; s.hasShotgun = true;
     p.x = CITY_HALF - 30; p.z = -38;
     s.camYaw = -2.32; p.ry = s.camYaw;
     const coupe = s.cars.find(c => c.kind === 'parked');
@@ -43,7 +45,7 @@ export function setupShotScene(s, kind) {
     p.inCar = car; p.x = car.x; p.z = car.z;
     car.rpm = 0.92;
     s.cash = 2840; s.armor = 50; s.health = 100;
-    s.radio = 1; s.respect = 340; // HUD sells it: RADIO VICE FM + RESPECT OPERATOR
+    s.radio = 1; s.respect = 340; s.hasGun = true; // RADIO VICE FM + RESPECT OPERATOR + arsenal slots
     // Traffic ahead (taxi close, sedan further) + oncoming lane car.
     placeTrafficAt(s, 0, car.x, car.z + 18, 0, [0.98, 0.78, 0.15]);
     placeTrafficAt(s, 1, car.x, car.z + 38, 0, [0.85, 0.88, 0.9]);
@@ -113,7 +115,7 @@ export function setupShotScene(s, kind) {
     car.kind = 'player'; car.x = roadC - 3.6; car.z = bestZ; car.ry = 0;
     p.inCar = car; p.x = car.x; p.z = car.z;
     car.rpm = 0.8; s.wanted = 4; s.trauma = 0.45;
-    s.radio = 2; s.respect = 720; // RADIO SOLMAR + RESPECT KINGPIN on the HUD
+    s.radio = 2; s.respect = 720; s.hasGun = true; s.hasSmg = true; s.hasShotgun = true; // RADIO SOLMAR + KINGPIN + 3 weapons owned
     s.mission = { name: 'VICE ESCAPE', desc: "Survive the 4-star heat, then reach the Pay 'n Spray.", idx: 4, surviveT: 97, target: { x: s.city.zones.spray.x, z: s.city.zones.spray.z, r: 6 } };
     const fx = Math.sin(car.ry), fz = Math.cos(car.ry), rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
     const mkCop = (x, z, ry) => ({ id: 950 + s.cops.length, kind: 'cop', x, z, ry, speed: 12, targetSpeed: 20, hp: 120, smoke: 0, driver: true, stopped: 0, color: [0.95, 0.95, 0.97] });
@@ -180,7 +182,7 @@ export function setupShotScene(s, kind) {
       if (clear) { p.x = px; p.z = pz; placed = true; break; }
     }
     if (!placed) { p.x = z.x - 10; p.z = z.z + 12; }
-    s.camYaw = Math.atan2(z.x - p.x, z.z - p.z); p.ry = s.camYaw;
+    s.camYaw = Math.atan2(z.x - p.x, z.z - p.z) + 0.13; p.ry = s.camYaw; // aim line falls left of the gold car so the muzzle flash reads against the street
     s.hasGun = true;
     const gold = s.cars.find(c => c.kind === 'parked');
     gold.x = z.x; gold.z = z.z; gold.ry = Math.PI / 2; gold.color = [0.98, 0.8, 0.35];
@@ -193,7 +195,8 @@ export function setupShotScene(s, kind) {
     s.banner = 'MISSION PASSED'; s.bannerColor = '#00FFCC'; s.bannerT = 999;
     s.mission = { name: 'THE RIVAL DEAL', desc: 'REWARD: $20,000', target: null };
     s.cash = 21450; s.wanted = 0;
-    s.respect = 760; s.hasSmg = true; s.weapon = 'smg'; s.ammoSmg = 28; // endgame loadout on the HUD: SMG + KINGPIN
+    s.respect = 760; s.hasSmg = true; s.hasShotgun = true; s.hasRifle = true; s.weapon = 'rifle'; s.ammoRifle = 17; // full arsenal on the slots, RIFLE in hand
+    s.flashT = 999; s.recoil = 0.8; p.aim = true; // mid-burst: muzzle flash + tracer in the still
     out.skids = [{ x: z.x - 6, z: z.z + 2, ry: Math.PI / 2, len: 10 }, { x: z.x - 11, z: z.z + 2.6, ry: Math.PI / 2, len: 8 }];
     // Celebration smoke rises off the gold car, NOT in the camera's face.
     for (let i = 0; i < 8; i++) out.puffs.push({ x: z.x + (i % 3 - 1) * 0.8, y: 1.2 + i * 0.35, z: z.z + (i % 2) * 1.2 - 0.6, vx: 0.2, vy: 0.7, vz: 0.1, life: 1.4, size: 0.3, color: [0.8, 0.8, 0.82] });

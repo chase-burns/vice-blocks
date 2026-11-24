@@ -9,7 +9,7 @@ export function loadProfile() {
   return mem;
 }
 export function saveProfile(s) {
-  const data = { cash: s.cash, missionIdx: s.missionIdx, hasGun: s.hasGun, armor: s.armor, respect: s.respect, hasSmg: s.hasSmg, armorUp: s.armorUp, engineUp: s.engineUp };
+  const data = { cash: s.cash, missionIdx: s.missionIdx, hasGun: s.hasGun, armor: s.armor, respect: s.respect, hasSmg: s.hasSmg, hasShotgun: s.hasShotgun, hasRifle: s.hasRifle, weapon: s.weapon, armorUp: s.armorUp, engineUp: s.engineUp };
   mem = data;
   try { localStorage.setItem(KEY, JSON.stringify(data)); } catch { /* keep mem copy */ }
 }

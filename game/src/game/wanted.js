@@ -86,7 +86,7 @@ export function stepCop(s, c, dt) {
 export function stepWanted(s, dt) {
   applyPending(s, dt);
   // Helicopter unit: joins at 5 stars, orbits the player with a spotlight.
-  if (s.wanted >= 5 && !s.heli) { s.heli = { a: s.rng.range(0, 6.28), h: 28, x: s.player.x + 30, z: s.player.z }; s.events.push({ name: 'heli' }); }
+  if (s.wanted >= 5 && !s.heli) { s.heli = { a: s.rng.range(0, 6.28), h: 28, x: s.player.x + 30, z: s.player.z }; s.events.push({ name: 'heli' }); s.msg = 'SBPD AIR UNIT — KESTREL-1 DEPLOYED'; s.msgT = 2.6; }
   if (s.heli) {
     if (s.wanted <= 3) s.heli = null;
     else {
