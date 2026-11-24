@@ -1,16 +1,18 @@
-// player.js — everything the player does directly: first-person walking,
-// driving through the physics model, entering and stealing cars,
-// shooting, gun-store shopping, Pay 'n Spray from the driver's seat,
-// taking damage, and respawning after a bust or hospital visit.
+// player.js — everything the player does with their own hands and feet:
+// first-person walking, driving through the physics model, entering and
+// stealing cars, shooting, shopping at the gun store, using the
+// Pay 'n Spray from the driver's seat, taking damage, and respawning
+// after a bust or a hospital visit.
 import { dist2 } from '../rng.js';
 import { collideBuildings, BLOCK } from './world.js';
 import { VehiclePhysics } from './physics.js';
 import { damageCar } from './traffic.js';
 import { witnessed } from './wanted.js';
 
-// Arsenal: all four weapons share one reserve pool; each keeps its own
-// magazine field, cadence, spread, pellets and vehicle damage.
-// Ammu-Nation sells strictly in order; keys 1–4 switch owned weapons.
+// The arsenal. All four weapons draw from one shared reserve pool; each
+// keeps its own magazine field, cadence, spread, pellet count and
+// vehicle damage. Ammu-Nation sells strictly in order, and keys 1–4
+// switch between the weapons you own.
 export const WEAPONS = {
   pistol: { label: 'PISTOL', short: '9MM', mag: 'ammo', size: 12, cd: 0.25, auto: false, spread: 1.2, carDmg: 18, range: 50, pellets: 1, price: 300 },
   smg: { label: 'SMG', short: 'SMG', mag: 'ammoSmg', size: 30, cd: 0.09, auto: true, spread: 2.8, carDmg: 9, range: 50, pellets: 1, price: 600 },
@@ -18,16 +20,16 @@ export const WEAPONS = {
   rifle: { label: 'RIFLE', short: 'AR', mag: 'ammoRifle', size: 25, cd: 0.13, auto: true, spread: 0.7, carDmg: 22, range: 70, pellets: 1, price: 1000 },
 };
 export const WEAPON_ORDER = ['pistol', 'smg', 'shotgun', 'rifle'];
-const FLAG = { pistol: 'hasGun', smg: 'hasSmg', shotgun: 'hasShotgun', rifle: 'hasRifle' };
-const START = { pistol: 12, smg: 30, shotgun: 6, rifle: 25 };
+const OWNED_FLAG = { pistol: 'hasGun', smg: 'hasSmg', shotgun: 'hasShotgun', rifle: 'hasRifle' };
+const STARTING_MAG = { pistol: 12, smg: 30, shotgun: 6, rifle: 25 };
 
-export function ownsWeapon(s, w) { return !!s[FLAG[w]]; }
+export function ownsWeapon(s, w) { return !!s[OWNED_FLAG[w]]; }
 export function activeWeapon(s) { return ownsWeapon(s, s.weapon) ? s.weapon : 'pistol'; }
 export function weaponDef(s) { return WEAPONS[activeWeapon(s)]; }
 
 export function hurt(s, dmg) {
-  const soaked = Math.min(s.armor, dmg * 0.6);
-  s.armor -= soaked; s.health -= dmg - soaked;
+  const absorbed = Math.min(s.armor, dmg * 0.6);
+  s.armor -= absorbed; s.health -= dmg - absorbed;
   s.events.push({ name: 'hurt', data: dmg });
   if (s.health <= 0 && s.mode === 'play') { s.health = 0; s.mode = 'wasted'; s.events.push({ name: 'wasted' }); }
 }
@@ -43,68 +45,68 @@ export function enterExitCar(s) {
     s.events.push({ name: 'exitCar' });
     return;
   }
-  let nearest = null, nearestD2 = 4.5 * 4.5;
+  let closest = null, closestD2 = 4.5 * 4.5;
   for (const car of s.cars.concat(s.cops)) {
     const d = dist2(car.x, car.z, p.x, p.z);
-    if (d < nearestD2) { nearestD2 = d; nearest = car; }
+    if (d < closestD2) { closestD2 = d; closest = car; }
   }
-  if (!nearest) return;
-  nearest.hpMax = s.armorUp ? 150 : 100;
-  if (nearest.gear == null) nearest.gear = 1;
-  if (!nearest.phys) nearest.phys = new VehiclePhysics();
-  nearest.phys.u = nearest.speed || 0; nearest.phys.v = 0; nearest.phys.omega = 0;
-  p.inCar = nearest;
-  if (nearest.kind === 'parked' || nearest.kind === 'traffic') {
-    if (nearest.driver) s.events.push({ name: 'yank' });
-    nearest.kind = 'player'; nearest.driver = false; s.stats.stolen++;
+  if (!closest) return;
+  closest.hpMax = s.armorUp ? 150 : 100;
+  if (closest.gear == null) closest.gear = 1;
+  if (!closest.phys) closest.phys = new VehiclePhysics();
+  closest.phys.u = closest.speed || 0; closest.phys.v = 0; closest.phys.omega = 0;
+  p.inCar = closest;
+  if (closest.kind === 'parked' || closest.kind === 'traffic') {
+    if (closest.driver) s.events.push({ name: 'yank' });
+    closest.kind = 'player'; closest.driver = false; s.stats.stolen++;
     s.wantedAPI.add(s, 1, witnessed(s, p.x, p.z));
   }
   s.events.push({ name: 'enterCar' });
 }
 
-// One trigger pull resolved per pellet: nearest pedestrian on the shot
-// line wins, then mission targets, then the nearest vehicle. Wanted
-// consequences scale with what was actually hit.
+// One trigger pull, resolved pellet by pellet: the nearest pedestrian on
+// the shot line wins, then mission targets, then the nearest vehicle.
+// The wanted consequences scale with what was actually hit.
 export function shoot(s) {
   const p = s.player;
   if (!s.hasGun || p.inCar) return;
-  const key = activeWeapon(s), W = WEAPONS[key];
+  const weaponKey = activeWeapon(s), W = WEAPONS[weaponKey];
   if (s[W.mag] <= 0) { s.events.push({ name: 'dryFire' }); return; }
   s[W.mag]--; s.recoil = 1; s.flashT = 0.07; s.gunfireT = 0.6; s.gunfireX = p.x; s.gunfireZ = p.z;
-  s.events.push({ name: 'shot', data: key });
+  s.events.push({ name: 'shot', data: weaponKey });
   const fx = Math.sin(p.ry), fz = Math.cos(p.ry);
-  let hitAnything = false, killedPed = false, hitCopCar = false;
+  let hitSomething = false, killedPed = false, hitCopCar = false;
   for (let pellet = 0; pellet < W.pellets; pellet++) {
-    const jitter = W.pellets > 1 ? (Math.random() * 2 - 1) * W.spread : 0;
-    const tol = W.pellets > 1 ? 1.15 : W.spread;
-    const alongOf = (x, z) => (x - p.x) * fx + (z - p.z) * fz;
-    const latOf = (x, z) => (x - p.x) * fz - (z - p.z) * fx - jitter;
-    let victim = null, victimDist = W.range;
+    const lateralJitter = W.pellets > 1 ? (Math.random() * 2 - 1) * W.spread : 0;
+    const tolerance = W.pellets > 1 ? 1.15 : W.spread;
+    const alongDist = (x, z) => (x - p.x) * fx + (z - p.z) * fz;
+    const lateralDist = (x, z) => (x - p.x) * fz - (z - p.z) * fx - lateralJitter;
+    let pedVictim = null, victimAlong = W.range;
     for (const ped of s.peds) {
       if (ped.state === 'dead') continue;
-      const along = alongOf(ped.x, ped.z);
-      if (along > 0 && along < victimDist && Math.abs(latOf(ped.x, ped.z)) < tol) { victim = ped; victimDist = along; }
+      const along = alongDist(ped.x, ped.z);
+      if (along > 0 && along < victimAlong && Math.abs(lateralDist(ped.x, ped.z)) < tolerance) { pedVictim = ped; victimAlong = along; }
     }
-    let targetHit = false;
+    let targetWasHit = false;
     for (const tg of s.targets || []) {
       if (tg.down) continue;
-      const along = alongOf(tg.x, tg.z);
-      if (along > 0 && along < victimDist && Math.abs(latOf(tg.x, tg.z)) < 1.4) { tg.down = true; targetHit = true; victimDist = along; }
+      const along = alongDist(tg.x, tg.z);
+      if (along > 0 && along < victimAlong && Math.abs(lateralDist(tg.x, tg.z)) < 1.4) { tg.down = true; targetWasHit = true; victimAlong = along; }
     }
-    if (targetHit) { s.events.push({ name: 'targetDown', data: null }); hitAnything = true; continue; }
-    if (victim) { victim.state = 'dead'; victim.t = 4; hitAnything = true; killedPed = true; s.events.push({ name: 'hitPed' }); continue; }
+    if (targetWasHit) { s.events.push({ name: 'targetDown', data: null }); hitSomething = true; continue; }
+    if (pedVictim) { pedVictim.state = 'dead'; pedVictim.t = 4; hitSomething = true; killedPed = true; s.events.push({ name: 'hitPed' }); continue; }
     for (const car of s.cars.concat(s.cops)) {
-      const along = alongOf(car.x, car.z);
-      if (along > 0 && along < W.range * 0.84 && Math.abs(latOf(car.x, car.z)) < 2.2) {
+      const along = alongDist(car.x, car.z);
+      if (along > 0 && along < W.range * 0.84 && Math.abs(lateralDist(car.x, car.z)) < 2.2) {
         damageCar(s, car, W.carDmg);
         if (car.kind === 'cop') hitCopCar = true;
-        hitAnything = true; break;
+        hitSomething = true; break;
       }
     }
   }
   if (killedPed) s.wantedAPI.add(s, 3, witnessed(s, p.x, p.z));
   else if (hitCopCar) s.wantedAPI.add(s, Math.max(3, s.wanted), true);
-  else if (!hitAnything) s.wantedAPI.add(s, 1, witnessed(s, p.x, p.z));
+  else if (!hitSomething) s.wantedAPI.add(s, 1, witnessed(s, p.x, p.z));
 }
 
 export function stepPlayerCar(s, input, dt) {
@@ -112,67 +114,68 @@ export function stepPlayerCar(s, input, dt) {
   if (!car.phys) car.phys = new VehiclePhysics();
   const phys = car.phys;
   phys.powerMul = s.engineUp ? 1.15 : 1;
-  const substeps = 2, sdt = dt / substeps;
-  let worst = 0;
+  const substeps = 2, subDt = dt / substeps;
+  let hardestHit = 0;
   for (let i = 0; i < substeps; i++) {
-    phys.update(sdt, { throttle: input.up ? 1 : 0, brake: input.down ? 1 : 0, steer: (input.left ? -1 : 0) + (input.right ? 1 : 0), handbrake: input.handbrake });
-    car.ry += phys.omega * sdt;
+    phys.update(subDt, { throttle: input.up ? 1 : 0, brake: input.down ? 1 : 0, steer: (input.left ? -1 : 0) + (input.right ? 1 : 0), handbrake: input.handbrake });
+    car.ry += phys.omega * subDt;
     const fx = Math.sin(car.ry), fz = Math.cos(car.ry), rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
-    const vx = fx * phys.u + rx * phys.v, vz = fz * phys.u + rz * phys.v;
-    let nx = car.x + vx * sdt, nz = car.z + vz * sdt;
-    const resolved = collideBuildings(s.city, nx, nz, 1.7);
-    const cx = resolved[0], cz = resolved[1];
-    if (cx !== nx || cz !== nz) {
-      const pushX = cx - nx, pushZ = cz - nz, pushLen = Math.hypot(pushX, pushZ) || 1;
-      const ax = pushX / pushLen, az = pushZ / pushLen;
-      const vN = vx * ax + vz * az;
-      if (vN < 0) {
-        const slideX = vx - vN * ax, slideZ = vz - vN * az;
-        const nvx = slideX * 0.5 - vN * 0.2 * ax, nvz = slideZ * 0.5 - vN * 0.2 * az;
-        worst = Math.max(worst, Math.abs(vN));
-        phys.u = nvx * fx + nvz * fz; phys.v = nvx * rx + nvz * rz;
+    const velX = fx * phys.u + rx * phys.v, velZ = fz * phys.u + rz * phys.v;
+    let tryX = car.x + velX * subDt, tryZ = car.z + velZ * subDt;
+    const resolved = collideBuildings(s.city, tryX, tryZ, 1.7);
+    const resX = resolved[0], resZ = resolved[1];
+    if (resX !== tryX || resZ !== tryZ) {
+      const pushX = resX - tryX, pushZ = resZ - tryZ, pushLen = Math.hypot(pushX, pushZ) || 1;
+      const axisX = pushX / pushLen, axisZ = pushZ / pushLen;
+      const velIntoWall = velX * axisX + velZ * axisZ;
+      if (velIntoWall < 0) {
+        const slideX = velX - velIntoWall * axisX, slideZ = velZ - velIntoWall * axisZ;
+        const newVelX = slideX * 0.5 - velIntoWall * 0.2 * axisX, newVelZ = slideZ * 0.5 - velIntoWall * 0.2 * axisZ;
+        hardestHit = Math.max(hardestHit, Math.abs(velIntoWall));
+        phys.u = newVelX * fx + newVelZ * fz; phys.v = newVelX * rx + newVelZ * rz;
       }
-      nx = cx; nz = cz;
+      tryX = resX; tryZ = resZ;
     }
-    car.x = nx; car.z = nz;
+    car.x = tryX; car.z = tryZ;
   }
   car.speed = phys.u; car.velSpeed = Math.hypot(phys.u, phys.v);
   car.steerAngle = phys.steerAngle; car.slip = Math.abs(phys.v - phys.omega * 1.4);
   car.rpm = phys.rpm; car.gear = phys.gear; car.handbrake = phys.handbrake; car.isDrifting = phys.isDrifting;
-  if (worst > 4) { damageCar(s, car, worst * 1.1); s.events.push({ name: 'crash', data: worst }); s.trauma = Math.min(1, (s.trauma || 0) + worst / 15); }
+  if (hardestHit > 4) { damageCar(s, car, hardestHit * 1.1); s.events.push({ name: 'crash', data: hardestHit }); s.trauma = Math.min(1, (s.trauma || 0) + hardestHit / 15); }
   p.x = car.x; p.z = car.z; p.ry = car.ry;
-  resolveCarContacts(s, car, phys);
-  resolvePedContacts(s, car);
+  resolveVehicleContacts(s, car, phys);
+  resolvePedestrianContacts(s, car);
   car.smoke = car.hp < 55 ? (car.hp < 25 ? 2 : 1) : 0;
   if (car.smoke === 2 && s.rng.chance(dt * 0.25)) damageCar(s, car, 3);
-  collectPickups(s);
+  gatherPickups(s);
 }
 
-// Shoving traffic aside; a roadblock cruiser can be punched through —
-// it spins off line, the line breaks, and the law notices.
-function resolveCarContacts(s, car, phys) {
+// Shoving other traffic aside as you pass. A roadblock cruiser can be
+// punched straight through: it spins off the line, the line breaks, and
+// the law definitely notices.
+function resolveVehicleContacts(s, car, phys) {
   for (const other of s.cars.concat(s.cops)) {
     if (other === car || other.kind === 'dead') continue;
     if (dist2(other.x, other.z, car.x, car.z) >= 3.1 * 3.1) continue;
     if (car.velSpeed <= 2) continue;
-    const dx = other.x - car.x, dz = other.z - car.z, dl = Math.hypot(dx, dz) || 1;
+    const dx = other.x - car.x, dz = other.z - car.z, len = Math.hypot(dx, dz) || 1;
     if (other.roadblock) {
       other.roadblock = false;
-      other.x += (dx / dl) * 2.4 + (dz / dl) * 1.2;
-      other.z += (dz / dl) * 2.4 - (dx / dl) * 1.2;
+      other.x += (dx / len) * 2.4 + (dz / len) * 1.2;
+      other.z += (dz / len) * 2.4 - (dx / len) * 1.2;
       other.ry += 0.9; other.speed = 3;
       damageCar(s, other, 30); damageCar(s, car, 10);
       s.trauma = Math.min(1, (s.trauma || 0) + 0.3);
       s.events.push({ name: 'roadblockHit', data: other });
       s.wantedAPI.add(s, Math.max(4, s.wanted), true);
     } else {
-      other.x += (dx / dl) * 0.9; other.z += (dz / dl) * 0.9;
+      other.x += (dx / len) * 0.9; other.z += (dz / len) * 0.9;
       damageCar(s, other, 8); damageCar(s, car, 5); phys.u *= 0.82;
     }
   }
 }
 
-function resolvePedContacts(s, car) {
+function resolvePedestrianContacts(s, car) {
   for (const ped of s.peds) {
     if (ped.state === 'dead') continue;
     if (car.velSpeed <= 5) continue;
@@ -186,34 +189,34 @@ function resolvePedContacts(s, car) {
 
 export function stepPlayerFoot(s, input, dt) {
   const p = s.player;
-  const speed = input.shift ? 8.2 : 4.5;
-  const strafe = (input.right ? 1 : 0) - (input.left ? 1 : 0);
-  const forward = (input.up ? 1 : 0) - (input.down ? 1 : 0);
+  const moveSpeed = input.shift ? 8.2 : 4.5;
+  const strafeInput = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+  const forwardInput = (input.up ? 1 : 0) - (input.down ? 1 : 0);
   p.bobPhase = p.bobPhase || 0;
-  if (strafe || forward) {
+  if (strafeInput || forwardInput) {
     const yaw = s.camYaw;
     const fx = Math.sin(yaw), fz = Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
-    let dx = fx * forward + rx * strafe, dz = fz * forward + rz * strafe;
-    const len = Math.hypot(dx, dz) || 1; dx /= len; dz /= len;
-    p.ry = Math.atan2(dx, dz);
-    const resolved = collideBuildings(s.city, p.x + dx * speed * dt, p.z + dz * speed * dt, 0.55);
+    let moveX = fx * forwardInput + rx * strafeInput, moveZ = fz * forwardInput + rz * strafeInput;
+    const len = Math.hypot(moveX, moveZ) || 1; moveX /= len; moveZ /= len;
+    p.ry = Math.atan2(moveX, moveZ);
+    const resolved = collideBuildings(s.city, p.x + moveX * moveSpeed * dt, p.z + moveZ * moveSpeed * dt, 0.55);
     p.x = resolved[0]; p.z = resolved[1];
-    p.speed = speed; p.bobPhase += dt * speed * 1.6;
+    p.speed = moveSpeed; p.bobPhase += dt * moveSpeed * 1.6;
   } else p.speed = 0;
   p.aim = !!(input.aim && s.hasGun);
-  collectPickups(s);
-  stepFootZones(s, input, dt);
+  gatherPickups(s);
+  stepFootZoneEffects(s, input, dt);
 }
 
-function inZone(p, zone) { return dist2(p.x, p.z, zone.x, zone.z) < zone.r * zone.r; }
+function insideZone(p, zone) { return dist2(p.x, p.z, zone.x, zone.z) < zone.r * zone.r; }
 
-function stepFootZones(s, input, dt) {
+function stepFootZoneEffects(s, input, dt) {
   const p = s.player, zones = s.city.zones;
-  if (inZone(p, zones.gunshop) && input.interact) buyNext(s);
-  if (inZone(p, zones.hospital) && s.health < 100) s.health = Math.min(100, s.health + 22 * dt);
+  if (insideZone(p, zones.gunshop) && input.interact) buyNextWeapon(s);
+  if (insideZone(p, zones.hospital) && s.health < 100) s.health = Math.min(100, s.health + 22 * dt);
 }
 
-function buyNext(s) {
+function buyNextWeapon(s) {
   const nextKey = WEAPON_ORDER.find((w) => !ownsWeapon(s, w));
   if (!nextKey) {
     if (s.reserve < 240) { s.reserve = 240; s.msg = 'AMMO RESTOCKED'; s.msgT = 1.5; }
@@ -222,13 +225,13 @@ function buyNext(s) {
   const def = WEAPONS[nextKey];
   if (s.cash < def.price) { s.msg = def.label + ' $' + def.price + ' — NOT ENOUGH CASH'; s.msgT = 2; return; }
   s.cash -= def.price;
-  s[FLAG[nextKey]] = true; s[def.mag] = START[nextKey]; s.weapon = nextKey;
+  s[OWNED_FLAG[nextKey]] = true; s[def.mag] = STARTING_MAG[nextKey]; s.weapon = nextKey;
   s.msg = nextKey === 'pistol' ? 'PISTOL PURCHASED — RIGHT MOUSE AIM, LEFT CLICK FIRE' : def.label + ' PURCHASED — KEYS 1-4 SWITCH';
   s.msgT = nextKey === 'pistol' ? 3 : 2.5;
   s.events.push({ name: 'buyGun' }); s.events.push({ name: 'save' });
 }
 
-function collectPickups(s) {
+function gatherPickups(s) {
   const p = s.player;
   for (let i = s.pickups.length - 1; i >= 0; i--) {
     const pk = s.pickups[i];
@@ -242,24 +245,24 @@ function collectPickups(s) {
   }
 }
 
-// Pay 'n Spray from the driver's seat. Priority: clear heat, then
-// repairs, then the two one-time garage upgrades.
+// Pay 'n Spray, used from the driver's seat. Priority order: clear the
+// heat first, then repairs, then the two one-time garage upgrades.
 export function stepZonesCar(s, dt) {
   void dt;
   const p = s.player, car = p.inCar;
   if (!car) return;
-  const spray = s.city.zones.spray;
-  if (!inZone(p, spray)) return;
-  const cap = car.hpMax || 100;
-  const repaint = () => { car.hp = cap; car.smoke = 0; car.burning = null; };
+  const sprayZone = s.city.zones.spray;
+  if (!insideZone(p, sprayZone)) return;
+  const hpCap = car.hpMax || 100;
+  const fullRespray = () => { car.hp = hpCap; car.smoke = 0; car.burning = null; };
   if (s.wanted > 0 && s.cash >= 100) {
     s.cash -= 100; s.wanted = 0; s.crimeHeat = 0; s.pendingStars = null;
     s.cops = s.cops.filter((c) => c === car);
-    repaint();
+    fullRespray();
     car.color = [s.rng.range(0.3, 1), s.rng.range(0.3, 1), s.rng.range(0.3, 1)];
     s.events.push({ name: 'spray' }); s.events.push({ name: 'save' });
-  } else if (car.hp < cap && s.cash >= 100) {
-    s.cash -= 100; repaint(); s.events.push({ name: 'spray' });
+  } else if (car.hp < hpCap && s.cash >= 100) {
+    s.cash -= 100; fullRespray(); s.events.push({ name: 'spray' });
   } else if (!s.armorUp && s.cash >= 400) {
     s.cash -= 400; s.armorUp = true; car.hpMax = 150;
     s.msg = 'ARMOUR FITTED — HULL +50% ($400)'; s.msgT = 2.5;

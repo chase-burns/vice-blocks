@@ -1,37 +1,36 @@
-// Vice Blocks 3D — delivery entry point for the make.fun gta6-01 bounty.
+// Vice Blocks 3D — the make.fun gta6-01 hand-in program.
 //
-// The playable part is a static offline bundle in game/: hand-written
-// WebGL, no dependencies and nothing downloaded at runtime. This module
-// only packages that bundle. It copies game/ plus screenshots/ into the
-// destination folder and asks the vendored make.fun helper to write
-// dossier.json under the scorer's own limits, so an oversize package is
-// caught locally rather than during judging.
+// What is being handed in is the static, offline game under game/:
+// hand-written WebGL, zero libraries, zero runtime fetching. This file
+// is packaging only. It mirrors game/ and screenshots/ into the output
+// directory, then has the vendored make.fun library produce
+// dossier.json there under the scorer's own caps, so a package that
+// judging would refuse fails here first.
 //
-// Local run:  MAKEFUN_OUTPUT_DIR=out node main.ts
-// Outside the grader MAKEFUN_OUTPUT_DIR substitutes for /output.
+// Local use:  MAKEFUN_OUTPUT_DIR=out node main.ts
+// (MAKEFUN_OUTPUT_DIR stands in for /output away from the grader.)
 
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-const rootHere = fileURLToPath(new URL('.', import.meta.url));
-const destination = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const here = fileURLToPath(new URL('.', import.meta.url));
+const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-mkdirSync(destination, { recursive: true });
-cpSync(join(rootHere, 'game'), join(destination, 'game'), { recursive: true });
+mkdirSync(outDir, { recursive: true });
+cpSync(join(here, 'game'), join(outDir, 'game'), { recursive: true });
 
-const shotsHere = join(rootHere, 'screenshots');
-mkdirSync(join(destination, 'screenshots'), { recursive: true });
-if (existsSync(shotsHere)) {
-  cpSync(shotsHere, join(destination, 'screenshots'), { recursive: true });
+const shotsDir = join(here, 'screenshots');
+mkdirSync(join(outDir, 'screenshots'), { recursive: true });
+if (existsSync(shotsDir)) {
+  cpSync(shotsDir, join(outDir, 'screenshots'), { recursive: true });
 }
 
-const dossier = buildDossier(destination, {
+writeFileSync(join(outDir, 'dossier.json'), buildDossier(outDir, {
   text_max_bytes: 163840,
   screenshots: { max: 4, max_bytes: 262144 },
   game_max_files: 993,
   game_max_bytes: 50331648,
   game_path_max_bytes: 1000,
-});
-writeFileSync(join(destination, 'dossier.json'), dossier);
+}));

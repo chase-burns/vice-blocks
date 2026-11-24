@@ -1,20 +1,21 @@
-// storage.js — profile persistence in localStorage under one key.
-// The saved shape covers cash, story position, owned weapons, respect and
-// garage upgrades. If browser storage throws (private browsing and the
-// like), an in-memory object keeps progress for the current session.
-const KEY = 'viceblocks-save';
-let sessionCopy = null;
+// storage.js — the player's profile, persisted under a single
+// localStorage key. What gets saved: cash, story progress, which weapons
+// are owned and which is equipped, respect, and both garage upgrades.
+// When browser storage refuses (private windows do), an in-memory copy
+// still keeps the profile alive for the rest of the session.
+const SAVE_KEY = 'viceblocks-save';
+let memoryFallback = null;
 
 export function loadProfile() {
   try {
-    const text = localStorage.getItem(KEY);
-    if (text) return JSON.parse(text);
-  } catch { /* use the session copy below */ }
-  return sessionCopy;
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* fall through to the in-memory copy */ }
+  return memoryFallback;
 }
 
 export function saveProfile(s) {
-  const profile = {
+  const snapshot = {
     cash: s.cash,
     missionIdx: s.missionIdx,
     hasGun: s.hasGun,
@@ -27,8 +28,8 @@ export function saveProfile(s) {
     armorUp: s.armorUp,
     engineUp: s.engineUp,
   };
-  sessionCopy = profile;
+  memoryFallback = snapshot;
   try {
-    localStorage.setItem(KEY, JSON.stringify(profile));
-  } catch { /* sessionCopy already holds this save */ }
+    localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
+  } catch { /* memoryFallback already captured this save */ }
 }

@@ -1,7 +1,8 @@
-// renderer.js — compact hand-rolled WebGL1 renderer. It owns the shader
-// program, column-major matrix helpers, buffer upload, and the two draw
-// primitives the game is built from: a tinted unit cube in the world and
-// a thin textured panel for the gauge cluster and spotlight pool.
+// renderer.js — a small WebGL1 renderer written from scratch. It owns
+// the compiled shader program, the column-major matrix helpers, buffer
+// upload, and the two draw primitives everything else is assembled from:
+// a tinted unit cube placed in the world, and a thin textured panel (the
+// gauge cluster face, the spotlight pool on the road).
 import { VS, FS } from './shaders.js';
 import { makeTextures } from './textures.js';
 import { unitCubeData } from './mesh.js';
@@ -11,12 +12,12 @@ export function mat4Identity() {
 }
 
 export function mat4Perspective(fov, aspect, near, far) {
-  const f = 1 / Math.tan(fov / 2);
-  const nf = 1 / (near - far);
+  const focal = 1 / Math.tan(fov / 2);
+  const rangeInv = 1 / (near - far);
   const m = new Float32Array(16);
-  m[0] = f / aspect; m[5] = f;
-  m[10] = (far + near) * nf; m[11] = -1;
-  m[14] = 2 * far * near * nf;
+  m[0] = focal / aspect; m[5] = focal;
+  m[10] = (far + near) * rangeInv; m[11] = -1;
+  m[14] = 2 * far * near * rangeInv;
   return m;
 }
 
@@ -42,16 +43,16 @@ export function mat4LookAt(eye, center, up) {
 }
 
 export function mat4Multiply(a, b) {
-  const out = new Float32Array(16);
+  const product = new Float32Array(16);
   for (let col = 0; col < 4; col++) for (let row = 0; row < 4; row++) {
-    let sum = 0;
-    for (let k = 0; k < 4; k++) sum += a[k * 4 + row] * b[col * 4 + k];
-    out[col * 4 + row] = sum;
+    let acc = 0;
+    for (let k = 0; k < 4; k++) acc += a[k * 4 + row] * b[col * 4 + k];
+    product[col * 4 + row] = acc;
   }
-  return out;
+  return product;
 }
 
-// Model matrix for an upright object at (x,y,z), yawed and scaled.
+// Model matrix for an upright object: position, yaw, scale.
 export function mat4Model(x, y, z, ry, sx, sy, sz) {
   const c = Math.cos(ry), s = Math.sin(ry);
   return new Float32Array([
@@ -59,8 +60,8 @@ export function mat4Model(x, y, z, ry, sx, sy, sz) {
   ]);
 }
 
-// Full pose matrix: yaw, then pitch, then roll, with scale — for leaning
-// objects such as wheels, the helicopter and weapon viewmodels.
+// Posed model matrix — yaw, pitch, roll, scale — for anything that leans:
+// wheels, the helicopter, weapon viewmodels.
 export function mat4ModelPose(x, y, z, ry, pitch, roll, sx, sy, sz) {
   const cy = Math.cos(ry), syaw = Math.sin(ry);
   const cp = Math.cos(pitch), sp = Math.sin(pitch);
@@ -79,12 +80,12 @@ export function mat4ModelPose(x, y, z, ry, pitch, roll, sx, sy, sz) {
   return out;
 }
 
-function compile(gl, type, source) {
-  const sh = gl.createShader(type);
-  gl.shaderSource(sh, source);
-  gl.compileShader(sh);
-  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('shader: ' + gl.getShaderInfoLog(sh));
-  return sh;
+function compileShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error('shader: ' + gl.getShaderInfoLog(shader));
+  return shader;
 }
 
 export class Renderer {
@@ -92,14 +93,14 @@ export class Renderer {
     const gl = canvas.getContext('webgl', { antialias: true });
     if (!gl) throw new Error('WebGL unavailable');
     this.gl = gl; this.canvas = canvas;
-    const prog = gl.createProgram();
-    gl.attachShader(prog, compile(gl, gl.VERTEX_SHADER, VS));
-    gl.attachShader(prog, compile(gl, gl.FRAGMENT_SHADER, FS));
-    gl.linkProgram(prog); gl.useProgram(prog); this.prog = prog;
-    const U = (n) => gl.getUniformLocation(prog, n);
+    const program = gl.createProgram();
+    gl.attachShader(program, compileShader(gl, gl.VERTEX_SHADER, VS));
+    gl.attachShader(program, compileShader(gl, gl.FRAGMENT_SHADER, FS));
+    gl.linkProgram(program); gl.useProgram(program); this.prog = program;
+    const U = (name) => gl.getUniformLocation(program, name);
     this.loc = {
-      pos: gl.getAttribLocation(prog, 'aPos'), norm: gl.getAttribLocation(prog, 'aNorm'),
-      uv: gl.getAttribLocation(prog, 'aUv'), col: gl.getAttribLocation(prog, 'aCol'),
+      pos: gl.getAttribLocation(program, 'aPos'), norm: gl.getAttribLocation(program, 'aNorm'),
+      uv: gl.getAttribLocation(program, 'aUv'), col: gl.getAttribLocation(program, 'aCol'),
       mvp: U('uMvp'), model: U('uModel'), tex: U('uTex'), useTex: U('uUseTex'),
       emissive: U('uEmissive'), sun: U('uSun'), fog: U('uFogColor'), horizon: U('uHorizon'),
       zen: U('uZen'), mid: U('uMid'), amb: U('uAmb'), cam: U('uCam'), alpha: U('uAlpha'), sky: U('uSky'),
@@ -111,9 +112,9 @@ export class Renderer {
     this.zen = [0.42, 0.66, 0.92];
     this.mid = [0.98, 0.78, 0.58];
     this.ambScale = 1.0;
-    const raw = [0.8, 0.25, -0.5];
-    const L = Math.hypot(raw[0], raw[1], raw[2]);
-    this.sunDir = raw.map((v) => v / L);
+    const sunRaw = [0.8, 0.25, -0.5];
+    const sunLen = Math.hypot(sunRaw[0], sunRaw[1], sunRaw[2]);
+    this.sunDir = sunRaw.map((v) => v / sunLen);
     this.textures = makeTextures(gl);
     this._tintCache = new Map();
     this._skyMesh = null; this._panelMesh = null;
@@ -137,16 +138,17 @@ export class Renderer {
   }
 
   bindMesh(mesh) {
-    const gl = this.gl, L = this.loc, stride = 44;
+    const gl = this.gl, L = this.loc, strideBytes = 44;
     gl.bindBuffer(gl.ARRAY_BUFFER, mesh.buf);
-    gl.enableVertexAttribArray(L.pos); gl.vertexAttribPointer(L.pos, 3, gl.FLOAT, false, stride, 0);
-    gl.enableVertexAttribArray(L.norm); gl.vertexAttribPointer(L.norm, 3, gl.FLOAT, false, stride, 12);
-    gl.enableVertexAttribArray(L.uv); gl.vertexAttribPointer(L.uv, 2, gl.FLOAT, false, stride, 24);
-    gl.enableVertexAttribArray(L.col); gl.vertexAttribPointer(L.col, 3, gl.FLOAT, false, stride, 32);
+    gl.enableVertexAttribArray(L.pos); gl.vertexAttribPointer(L.pos, 3, gl.FLOAT, false, strideBytes, 0);
+    gl.enableVertexAttribArray(L.norm); gl.vertexAttribPointer(L.norm, 3, gl.FLOAT, false, strideBytes, 12);
+    gl.enableVertexAttribArray(L.uv); gl.vertexAttribPointer(L.uv, 2, gl.FLOAT, false, strideBytes, 24);
+    gl.enableVertexAttribArray(L.col); gl.vertexAttribPointer(L.col, 3, gl.FLOAT, false, strideBytes, 32);
   }
 
-  // Start a frame: clear, publish grade uniforms, draw the sky cube
-  // around the camera with depth writes off so the world wins over it.
+  // Open a frame: clear, push the grade uniforms, then draw the sky cube
+  // centred on the camera with depth writes disabled so the world draws
+  // over it.
   begin(view, proj, camPos) {
     const gl = this.gl;
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -175,14 +177,15 @@ export class Renderer {
     gl.uniform1f(this.loc.sky, o.sky ? 1 : 0);
     const alpha = o.alpha != null ? o.alpha : 1;
     gl.uniform1f(this.loc.alpha, alpha);
-    const blending = alpha < 1;
-    if (blending) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, o.add ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); }
+    const needsBlend = alpha < 1;
+    if (needsBlend) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, o.add ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); }
     if (o.tex) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.textures[o.tex]); }
     gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
-    if (blending) { gl.depthMask(true); gl.disable(gl.BLEND); }
+    if (needsBlend) { gl.depthMask(true); gl.disable(gl.BLEND); }
   }
 
-  // Tinted unit cube, cached per colour because the palette is small.
+  // A unit cube tinted one colour. The palette is tiny, so meshes are
+  // cached per colour instead of rebuilt per object.
   box(x, y, z, ry, w, h, d, color, opts) {
     const o = opts || {};
     const key = color.join(',');
@@ -194,7 +197,7 @@ export class Renderer {
     this.draw(mesh, model, o);
   }
 
-  // Thin textured panel used for the dash face and spotlight pool.
+  // The thin textured panel behind the dash gauges and the spotlight pool.
   panel(x, y, z, ry, w, h, texKey, opts) {
     const o = opts || {};
     if (!this._panelMesh) this._panelMesh = this.makeMesh(unitCubeData([1, 1, 1]));

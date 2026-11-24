@@ -1,8 +1,10 @@
-// physics.js — player-car movement in the body frame: forward speed u,
-// lateral speed v and yaw rate omega. Pacejka-style curves act at each
-// axle, a four-speed gearbox uses shift hysteresis, the handbrake drops
-// rear grip for drifts, and pitch/roll springs feed the cockpit camera.
-// Tuning is eager: full throttle passes 15 m/s in under two seconds.
+// physics.js — how the player's car moves, integrated in the body frame:
+// forward speed u, lateral speed v, yaw rate omega. Each axle gets a
+// Pacejka-style lateral force, the four-speed gearbox shifts with
+// hysteresis, the handbrake collapses rear grip to make drifts happen,
+// and a pair of pitch/roll springs feeds body motion to the cockpit
+// camera. The tune is eager on purpose — full throttle is past 15 m/s in
+// under two seconds.
 import { clamp } from '../rng.js';
 
 export const SPEC = {
@@ -15,15 +17,15 @@ export const SPEC = {
   pacejka: { B: 7.0, C: 1.35, E: 0.15 },
 };
 
-// Simplified Pacejka lateral force for one axle.
-function pacejkaForce(slip, grip, load) {
+// Simplified Pacejka curve: lateral force at one axle for a slip angle.
+function axleLateralForce(slip, grip, load) {
   const { B, C, E } = SPEC.pacejka;
   const x = B * slip;
   return grip * load * Math.sin(C * Math.atan(x - E * (x - Math.atan(x))));
 }
 
-// One damped-spring step; returns [value, velocity].
-function springStep(value, velocity, target, stiffness, damping, dt) {
+// Advance one damped spring by dt; returns [new value, new velocity].
+function stepSpring(value, velocity, target, stiffness, damping, dt) {
   const accel = stiffness * (target - value) - damping * velocity;
   return [value + velocity * dt, velocity + accel * dt];
 }
@@ -40,9 +42,9 @@ export class VehiclePhysics {
 
   get speed() { return this.u; }
 
-  // Gear selection with offset up/down thresholds so the box does not
-  // hunt when speed hovers on a boundary.
-  _selectGear() {
+  // Pick a gear with offset up/down thresholds, so the box does not hunt
+  // back and forth when the speed sits right on a boundary.
+  _pickGearBand() {
     if (this.u < -0.5) this._gearIndex = -1;
     else {
       let gi = this._gearIndex; if (gi < 0) gi = 0;
@@ -50,62 +52,62 @@ export class VehiclePhysics {
       while (gi > 0 && this.u < SPEC.gears[gi][0] - 1.5) gi--;
       this._gearIndex = gi;
     }
-    const shown = this._gearIndex + 1;
-    if (shown !== this.gear && this.u >= 0) { this.gear = shown; this._shiftPause = 0.09; }
+    const displayed = this._gearIndex + 1;
+    if (displayed !== this.gear && this.u >= 0) { this.gear = displayed; this._shiftPause = 0.09; }
     if (this.u < -0.5) this.gear = 0;
     return this._gearIndex >= 0 ? SPEC.gears[this._gearIndex] : [0, 8, 2600];
   }
 
   update(dt, input) {
     const M = SPEC.mass, L = SPEC.wheelbase, a = SPEC.frontAxle, b = SPEC.rearAxle;
-    const speedAbs = Math.abs(this.u), moving = speedAbs > 0.05, dirSign = Math.sign(this.u || 1);
-    const steerIn = clamp(input.steer || 0, -1, 1);
-    const lockNow = SPEC.steerLock / (1 + SPEC.steerSpeedFade * speedAbs);
-    const steerTarget = steerIn * lockNow;
-    const rackRate = steerIn === 0 ? 5.0 : 3.4;
-    this.steerAngle += clamp(steerTarget - this.steerAngle, -rackRate * dt, rackRate * dt);
+    const absU = Math.abs(this.u), isMoving = absU > 0.05, travelSign = Math.sign(this.u || 1);
+    const steerRequest = clamp(input.steer || 0, -1, 1);
+    const lockAtSpeed = SPEC.steerLock / (1 + SPEC.steerSpeedFade * absU);
+    const steerGoal = steerRequest * lockAtSpeed;
+    const rackSpeed = steerRequest === 0 ? 5.0 : 3.4;
+    this.steerAngle += clamp(steerGoal - this.steerAngle, -rackSpeed * dt, rackSpeed * dt);
     const delta = this.steerAngle;
-    const band = this._selectGear();
+    const band = this._pickGearBand();
     if (this._shiftPause > 0) this._shiftPause -= dt;
-    this.rpm = clamp((speedAbs - band[0]) / (band[1] - band[0]), 0.08, 1);
+    this.rpm = clamp((absU - band[0]) / (band[1] - band[0]), 0.08, 1);
     if (!input.throttle && !input.brake) this.rpm = clamp(this.rpm - dt * 0.5, 0.08, 1);
     this.throttle = input.throttle || 0;
-    let forceX = 0;
-    if (this._shiftPause <= 0) forceX += this.throttle * band[2] * SPEC.finalDrive * (this.powerMul || 1);
+    let longitudinalForce = 0;
+    if (this._shiftPause <= 0) longitudinalForce += this.throttle * band[2] * SPEC.finalDrive * (this.powerMul || 1);
     if (input.brake) {
-      if (this.u > 0.4) forceX -= SPEC.brakeForce;
-      else if (this.u > -10) forceX -= 2600 * SPEC.finalDrive * 0.45;
+      if (this.u > 0.4) longitudinalForce -= SPEC.brakeForce;
+      else if (this.u > -10) longitudinalForce -= 2600 * SPEC.finalDrive * 0.45;
     }
-    const handbrake = !!input.handbrake;
-    this.handbrake = handbrake;
-    if (handbrake) forceX -= Math.sign(this.u) * 6500 * 0.55;
-    if (moving) forceX -= SPEC.rollingResistance * M * SPEC.gravity * Math.sign(this.u);
-    forceX -= SPEC.dragK * this.u * speedAbs;
-    const denom = Math.max(speedAbs, 1.2) * dirSign;
-    const alphaFront = Math.atan((this.v + this.omega * a) / denom) - delta * dirSign;
-    const alphaRear = Math.atan((this.v - this.omega * b) / denom);
-    this.slipFront = alphaFront; this.slipRear = alphaRear;
+    const handbrakeOn = !!input.handbrake;
+    this.handbrake = handbrakeOn;
+    if (handbrakeOn) longitudinalForce -= Math.sign(this.u) * 6500 * 0.55;
+    if (isMoving) longitudinalForce -= SPEC.rollingResistance * M * SPEC.gravity * Math.sign(this.u);
+    longitudinalForce -= SPEC.dragK * this.u * absU;
+    const slipDenom = Math.max(absU, 1.2) * travelSign;
+    const slipFront = Math.atan((this.v + this.omega * a) / slipDenom) - delta * travelSign;
+    const slipRear = Math.atan((this.v - this.omega * b) / slipDenom);
+    this.slipFront = slipFront; this.slipRear = slipRear;
     const loadFront = M * SPEC.gravity * b / L, loadRear = M * SPEC.gravity * a / L;
-    const gripRear = handbrake ? SPEC.gripRearHandbrake : SPEC.gripDry;
-    const forceFront = moving ? -pacejkaForce(alphaFront, SPEC.gripDry, loadFront) * dirSign : 0;
-    const forceRear = moving ? -pacejkaForce(alphaRear, gripRear, loadRear) * dirSign : 0;
-    const aLong = forceX / M + this.omega * this.v;
-    const aLat = (forceFront + forceRear) / M - this.omega * this.u;
-    this.u += aLong * dt; this.v += aLat * dt;
-    let yawAccel = (a * forceFront - b * forceRear) / SPEC.yawInertia;
-    const counter = Math.sign(delta) !== 0 && Math.sign(delta) !== Math.sign(alphaRear) && Math.abs(alphaRear) > 0.05;
-    if (counter) yawAccel += -1.35 * this.omega * Math.abs(alphaRear);
-    const yawDamping = handbrake ? 0.55 : 1.35;
-    yawAccel -= this.omega * yawDamping * (speedAbs > 0.5 ? 1 : 0.25);
+    const rearGrip = handbrakeOn ? SPEC.gripRearHandbrake : SPEC.gripDry;
+    const frontForce = isMoving ? -axleLateralForce(slipFront, SPEC.gripDry, loadFront) * travelSign : 0;
+    const rearForce = isMoving ? -axleLateralForce(slipRear, rearGrip, loadRear) * travelSign : 0;
+    const accelLong = longitudinalForce / M + this.omega * this.v;
+    const accelLat = (frontForce + rearForce) / M - this.omega * this.u;
+    this.u += accelLong * dt; this.v += accelLat * dt;
+    let yawAccel = (a * frontForce - b * rearForce) / SPEC.yawInertia;
+    const counterSteering = Math.sign(delta) !== 0 && Math.sign(delta) !== Math.sign(slipRear) && Math.abs(slipRear) > 0.05;
+    if (counterSteering) yawAccel += -1.35 * this.omega * Math.abs(slipRear);
+    const yawDamp = handbrakeOn ? 0.55 : 1.35;
+    yawAccel -= this.omega * yawDamp * (absU > 0.5 ? 1 : 0.25);
     this.omega += yawAccel * dt;
-    if (!moving && !input.throttle && !input.brake) { this.u = 0; this.v *= 0.8; this.omega *= 0.7; }
+    if (!isMoving && !input.throttle && !input.brake) { this.u = 0; this.v *= 0.8; this.omega *= 0.7; }
     this.u = clamp(this.u, -11, 48);
-    this.aLong = aLong; this.aLat = aLat;
-    this.isDrifting = (handbrake && speedAbs > 3 && Math.abs(delta) > 0.04) || (Math.abs(this.v) > 2.5 && speedAbs > 5);
-    const ps = springStep(this.pitch, this._pitchVel, clamp(aLong * 0.012, -0.06, 0.05), 26, 5.5, dt);
-    this.pitch = ps[0]; this._pitchVel = ps[1];
-    const rs = springStep(this.roll, this._rollVel, clamp(-aLat * 0.016, -0.09, 0.09), 26, 5.5, dt);
-    this.roll = rs[0]; this._rollVel = rs[1];
+    this.aLong = accelLong; this.aLat = accelLat;
+    this.isDrifting = (handbrakeOn && absU > 3 && Math.abs(delta) > 0.04) || (Math.abs(this.v) > 2.5 && absU > 5);
+    const pitchNext = stepSpring(this.pitch, this._pitchVel, clamp(accelLong * 0.012, -0.06, 0.05), 26, 5.5, dt);
+    this.pitch = pitchNext[0]; this._pitchVel = pitchNext[1];
+    const rollNext = stepSpring(this.roll, this._rollVel, clamp(-accelLat * 0.016, -0.09, 0.09), 26, 5.5, dt);
+    this.roll = rollNext[0]; this._rollVel = rollNext[1];
     return this;
   }
 }
