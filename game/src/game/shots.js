@@ -57,25 +57,75 @@ export function setupShotScene(s, kind) {
   }
   if (kind === 'chase') {
     const car = s.cars.find(c => c.kind === 'parked');
-    // Snap onto a straight vertical road, facing +Z down its length, so the
-    // roadblock / heli / wreck staged ahead are actually in frame.
+    // Open straight-road staging: scan this road for the stretch with the
+    // fewest palm canopies overhanging the next 50 m, so the frame reads as
+    // an open chase corridor instead of a tunnel of fronds.
     const centers = roadCenters();
     const roadC = centers.reduce((a, b) => Math.abs(b - BLOCK * 0.5) < Math.abs(a - BLOCK * 0.5) ? b : a, centers[0]);
-    car.kind = 'player'; car.x = roadC - 3.6; car.z = -30; car.ry = 0;
+    // Score each stretch by (a) how many sight-rays from the cockpit to the
+    // staged helicopter are blocked by buildings / palm canopies (eye is the
+    // deterministic cockpit anchor; margins cover spring/trauma wobble) and
+    // (b) how many canopies overhang the corridor. Geometry mirrors the QA
+    // projection assertion in /tmp/qa-chase.mjs.
+    const segBlocked = (e, pt) => {
+      for (const b of s.city.buildings) {
+        const lo = [b.x - b.w / 2 - 0.3, 0, b.z - b.d / 2 - 0.3], hi = [b.x + b.w / 2 + 0.3, b.h, b.z + b.d / 2 + 0.3];
+        let t0 = 0, t1 = 1, miss = false;
+        for (let i = 0; i < 3; i++) {
+          const d = pt[i] - e[i];
+          if (Math.abs(d) < 1e-9) { if (e[i] < lo[i] || e[i] > hi[i]) { miss = true; break; } continue; }
+          let ta = (lo[i] - e[i]) / d, tb = (hi[i] - e[i]) / d;
+          if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+          t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+          if (t0 > t1) { miss = true; break; }
+        }
+        if (!miss && t0 < 0.97) return true;
+      }
+      for (const pm of s.city.palms) {
+        const sc = pm.s || 1, lean = pm.lean || 0.1;
+        const cxp = pm.x + lean * 1.65 * sc, czp = pm.z + lean * 0.5 * sc, cyp = 5.05 * sc, rr = 2.85 * sc + 0.4;
+        for (let i = 1; i < 40; i++) {
+          const t = i / 40;
+          if (t < 0.03 || t > 0.97) continue;
+          const x = e[0] + (pt[0] - e[0]) * t, y = e[1] + (pt[1] - e[1]) * t, zz = e[2] + (pt[2] - e[2]) * t;
+          if (Math.abs(y - cyp) < 0.5 && Math.hypot(x - cxp, zz - czp) < rr) return true;
+        }
+      }
+      return false;
+    };
+    let bestZ = -30, bestScore = Infinity;
+    for (let z = -75; z <= 25; z += 5) {
+      const eye = [roadC - 3.6 - 0.35, 1.22, z + 0.15];
+      const hx0 = roadC - 3.6 - 6, hz0 = z + 21, hh = 12.5, hry = 0.9;
+      const hfx = Math.sin(hry), hfz = Math.cos(hry), hrx = Math.cos(hry), hrz = -Math.sin(hry);
+      const hPts = [
+        [hx0, hh, hz0],
+        [hx0 + hfx * 3.2, hh, hz0 + hfz * 3.2],
+        [hx0 - hfx * 3.4, hh + 0.4, hz0 - hfz * 3.4],
+        [hx0 + hrx * 6.75, hh + 1.5, hz0 + hrz * 6.75],
+        [hx0 - hrx * 6.75, hh + 1.5, hz0 - hrz * 6.75],
+      ];
+      let score = hPts.filter(pt => segBlocked(eye, pt)).length * 100;
+      for (const pm of s.city.palms) if (Math.abs(pm.x - roadC) < 13 && pm.z > z - 4 && pm.z < z + 52) score++;
+      if (score < bestScore || (score === bestScore && Math.abs(z + 30) < Math.abs(bestZ + 30))) { bestScore = score; bestZ = z; }
+    }
+    car.kind = 'player'; car.x = roadC - 3.6; car.z = bestZ; car.ry = 0;
     p.inCar = car; p.x = car.x; p.z = car.z;
     car.rpm = 0.8; s.wanted = 4; s.trauma = 0.45;
     const fx = Math.sin(car.ry), fz = Math.cos(car.ry), rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
     const mkCop = (x, z, ry) => ({ id: 950 + s.cops.length, kind: 'cop', x, z, ry, speed: 12, targetSpeed: 20, hp: 120, smoke: 0, driver: true, stopped: 0, color: [0.95, 0.95, 0.97] });
-    s.cops.push(mkCop(car.x - rx * 2.6 + fx * 0.6, car.z - rz * 2.6 + fz * 0.6, car.ry + 0.15));
-    s.cops.push(mkCop(car.x - fx * 14 + rx * 5, car.z - fz * 14 + rz * 5, car.ry));
-    // 4-star roadblock: two cruisers side by side across the road ahead.
+    // PIT unit tucked behind (mirror / minimap dressing).
+    s.cops.push(mkCop(car.x - rx * 2.6 - fx * 2, car.z - rz * 2.6 - fz * 2, car.ry + 0.15));
+    // Pursuit unit alongside ahead-left, fully in frame.
+    s.cops.push(mkCop(car.x + fx * 9 + rx * 5.0, car.z + fz * 9 + rz * 5.0, car.ry + 0.05));
+    // 4-star roadblock: two cruisers angled nose-in across the road ahead.
     for (const sd of [-3.0, 3.0]) {
-      const rb = mkCop(car.x + fx * 13 + rx * sd, car.z + fz * 13 + rz * sd, car.ry + Math.PI / 2);
+      const rb = mkCop(car.x + fx * 15 + rx * sd, car.z + fz * 15 + rz * sd, car.ry + Math.PI / 2 - Math.sign(sd) * 0.30);
       rb.roadblock = true; rb.speed = 0;
       s.cops.push(rb);
     }
-    // Air unit overhead, spotlight locked on the player car (staged for frame).
-    s.heli = { a: 0, h: 6, ry: car.ry + 0.9, x: car.x + fx * 15 - rx * 3.5, z: car.z + fz * 15 - rz * 3.5 };
+    // Air unit high in the upper frame, broadside, spotlight on the player.
+    s.heli = { a: 0, h: 12.5, ry: car.ry + 0.9, x: car.x + fx * 21 - rx * 6, z: car.z + fz * 21 - rz * 6 };
     // A burning wreck by the roadside for the explosion chain money-shot.
     const wreck = placeTrafficAt(s, 3, car.x + fx * 11 - rx * 8, car.z + fz * 11 - rz * 8, car.ry + 0.7, [0.3, 0.3, 0.34]);
     wreck.burning = 1.4; wreck.hp = 0;
@@ -83,10 +133,10 @@ export function setupShotScene(s, kind) {
     placeTrafficAt(s, 0, car.x + fx * 26 - rx * 8, car.z + fz * 26 - rz * 8, car.ry + Math.PI / 2, [0.98, 0.78, 0.15]);
     placeTrafficAt(s, 1, car.x - fx * 10 + rx * 10, car.z - fz * 10 + rz * 10, car.ry, [0.4, 0.7, 0.4]);
     const road = roadC;
-    placePedAt(s, 0, road - 10, -42, false, road, -10);
-    placePedAt(s, 1, road + 10.5, -16, false, road, 10.5);
-    placePedAt(s, 2, road + 2, -8, true, road, 12);
-    placePedAt(s, 3, road + 16, -26, true, road, -13);
+    placePedAt(s, 0, road - 10, car.z - 12, false, road, -10);
+    placePedAt(s, 1, road + 10.5, car.z + 14, false, road, 10.5);
+    placePedAt(s, 2, road + 2, car.z + 22, true, road, 12);
+    placePedAt(s, 3, road + 16, car.z + 4, true, road, -13);
     for (let i = 0; i < 26; i++) out.puffs.push({ x: car.x - fx * 2 + rng.range(-1, 1), y: 0.5, z: car.z - fz * 2 + rng.range(-1, 1), vx: -fx * 2, vy: rng.range(1, 2), vz: -fz * 2, life: 1.6, size: 0.9, color: [0.85, 0.85, 0.88] });
     for (let i = 0; i < 10; i++) out.puffs.push({ x: car.x - rx * 2.2, y: 0.8, z: car.z - rz * 2.2, vx: -rx * 3, vy: 1.5, vz: -rz * 3, life: 0.5, size: 0.3, color: [1, 0.75, 0.25] });
     out.skids = [{ x: car.x - fx * 6, z: car.z - fz * 6, ry: car.ry, len: 9 }, { x: car.x - fx * 10, z: car.z - fz * 10, ry: car.ry + 0.2, len: 8 }];

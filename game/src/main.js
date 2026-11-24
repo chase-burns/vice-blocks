@@ -81,7 +81,9 @@ function buildCityMeshes(s) {
     }
     for (let i = 0; i < 9; i++) {
       const a = i / 9 * Math.PI * 2;
-      plain.box(tx + Math.sin(a) * 1.8 * sc, 4.9 * sc + 0.3, tz + Math.cos(a) * 1.8 * sc, 3.8 * sc, 0.08, 0.8 * sc, [0.18, 0.62, 0.33]);
+      const dx = Math.sin(a), dz = Math.cos(a);
+      plain.box(tx + dx * 1.15 * sc, 4.95 * sc + 0.3, tz + dz * 1.15 * sc, 2.4 * sc, 0.08, 0.55 * sc, [0.18, 0.62, 0.33]);
+      plain.box(tx + dx * 2.2 * sc, 4.55 * sc + 0.3, tz + dz * 2.2 * sc, 1.3 * sc, 0.07, 0.45 * sc, [0.16, 0.56, 0.30]);
     }
   }
   for (const l of city.lights) {
@@ -236,9 +238,10 @@ function drawInterior(s, car) {
   // live instrument cluster (canvas texture, needles track speed/rpm)
   q = at(1.36, -0.05, 0.95);
   R.panel(q[0], q[1], q[2], car.ry, 0.88, 0.42, 'dash', { pitch: -0.18 });
-  // steering wheel: slim ring (r=0.175) + three spokes, rotation = steer x 3.2
+  // steering wheel: ring (r=0.15) + three spokes, rotation = steer x 3.2;
+  // seated low and left-of-centre on the driver's axis, no hand blocks
   const wheelRoll = -(car.phys ? car.phys.steerAngle : 0) * 3.2;
-  const wc = at(0.74, -0.35, 0.82);
+  const wc = at(0.80, -0.12, 0.78);
   const wob = (dx, dy) => {
     const cr = Math.cos(wheelRoll), sr = Math.sin(wheelRoll);
     const lx = dx * cr - dy * sr, ly = dx * sr + dy * cr;
@@ -249,18 +252,15 @@ function drawInterior(s, car) {
   // ring: 12 short segments approximating a circle
   for (let i = 0; i < 12; i++) {
     const a = i / 12 * Math.PI * 2;
-    b = wob(Math.cos(a) * 0.175, Math.sin(a) * 0.175);
-    R.box(b[0], b[1], b[2], car.ry, 0.115, 0.048, 0.05, rimC, { pitch: -0.32, roll: wheelRoll + a + Math.PI / 2 });
+    b = wob(Math.cos(a) * 0.15, Math.sin(a) * 0.15);
+    R.box(b[0], b[1], b[2], car.ry, 0.10, 0.042, 0.045, rimC, { pitch: -0.32, roll: wheelRoll + a + Math.PI / 2 });
   }
   // three spokes: down, lower-left, lower-right (classic 3-spoke layout)
   for (const a of [-Math.PI / 2, -Math.PI / 2 - 2.1, -Math.PI / 2 + 2.1]) {
-    b = wob(Math.cos(a) * 0.095, Math.sin(a) * 0.095);
-    R.box(b[0], b[1], b[2], car.ry, 0.20, 0.042, 0.055, spokeC, { pitch: -0.32, roll: wheelRoll + a });
+    b = wob(Math.cos(a) * 0.082, Math.sin(a) * 0.082);
+    R.box(b[0], b[1], b[2], car.ry, 0.17, 0.038, 0.05, spokeC, { pitch: -0.32, roll: wheelRoll + a });
   }
-  b = wob(0, 0); R.box(b[0], b[1], b[2], car.ry, 0.11, 0.11, 0.09, [0.16, 0.16, 0.19], { pitch: -0.32, roll: wheelRoll });
-  // driver hands gripping the rim at 9 and 3
-  b = wob(-0.175, -0.01); R.box(b[0], b[1], b[2], car.ry, 0.09, 0.07, 0.11, [0.85, 0.68, 0.52], { pitch: -0.32, roll: wheelRoll });
-  b = wob(0.175, -0.01); R.box(b[0], b[1], b[2], car.ry, 0.09, 0.07, 0.11, [0.85, 0.68, 0.52], { pitch: -0.32, roll: wheelRoll });
+  b = wob(0, 0); R.box(b[0], b[1], b[2], car.ry, 0.095, 0.095, 0.08, [0.16, 0.16, 0.19], { pitch: -0.32, roll: wheelRoll });
   for (const sd of [-1, 1]) {
     q = at(0.92, sd * 1.02, 1.3);
     R.box(q[0], q[1], q[2], car.ry, 0.24, 0.13, 0.05, [0.08, 0.08, 0.1]);
@@ -272,15 +272,14 @@ function drawInterior(s, car) {
   R.box(q[0], q[1], q[2], car.ry, 0.42, 0.3, 1.1, [0.11, 0.11, 0.14]);
   q = at(0.55, 0.18, 0.6);
   R.box(q[0], q[1], q[2], car.ry, 0.07, 0.16, 0.07, [0.2, 0.2, 0.24]);
-  // rear-view mirror with a simple two-tone reflection (sky over road)
-  q = at(1.08, 0, 1.56);
-  R.box(q[0], q[1], q[2], car.ry, 0.5, 0.16, 0.05, [0.07, 0.07, 0.09]);
-  q = at(1.05, 0, 1.60);
-  R.box(q[0], q[1], q[2], car.ry, 0.44, 0.06, 0.02, [0.62, 0.78, 0.94], { emissive: true });
-  q = at(1.05, 0, 1.515);
-  R.box(q[0], q[1], q[2], car.ry, 0.44, 0.06, 0.02, [0.42, 0.42, 0.46], { emissive: true });
-  q = at(1.30, 0, 1.82);
-  R.box(q[0], q[1], q[2], car.ry, 2.05, 0.07, 0.12, [0.08, 0.08, 0.11]);
+  // rear-view mirror, small and tight to the top edge (two-tone reflection)
+  q = at(1.06, -0.02, 1.80);
+  R.box(q[0], q[1], q[2], car.ry, 0.36, 0.11, 0.04, [0.07, 0.07, 0.09]);
+  q = at(1.03, -0.02, 1.838);
+  R.box(q[0], q[1], q[2], car.ry, 0.30, 0.035, 0.02, [0.62, 0.78, 0.94], { emissive: true });
+  q = at(1.03, -0.02, 1.762);
+  R.box(q[0], q[1], q[2], car.ry, 0.30, 0.035, 0.02, [0.42, 0.42, 0.46], { emissive: true });
+  // (roof brow / sun-visor band removed entirely: it ate the top of the frame)
 }
 function drawGunView(s, eye, viewYaw, viewPitch, lowered = false) {
   const d = viewDir(viewYaw, viewPitch);
@@ -337,8 +336,8 @@ function drawHeli(s, t) {
   const dist = Math.hypot(dx, dz, y);
   const myaw = Math.atan2(dx, dz);
   const mpitch = Math.atan2(Math.hypot(dx, dz), y);
-  R.box((x + p.x) / 2, y / 2 + 0.5, (z + p.z) / 2, myaw, 1.5, dist, 1.5, [1, 0.98, 0.85], { alpha: 0.13, pitch: -mpitch });
-  R.box(p.x, 0.22, p.z, 0, 7.5, 0.06, 7.5, [1, 0.98, 0.85], { alpha: 0.30 });
+  R.box((x + p.x) / 2, y / 2 + 0.5, (z + p.z) / 2, myaw, 2.4, dist, 2.4, [1, 0.98, 0.85], { alpha: 0.22, pitch: -mpitch });
+  R.box(p.x, 0.22, p.z, 0, 9.5, 0.06, 9.5, [1, 0.98, 0.85], { alpha: 0.45 });
   R.box(p.x, 0.24, p.z, 0, 4.2, 0.06, 4.2, [1, 1, 0.95], { alpha: 0.35 });
 }
 
