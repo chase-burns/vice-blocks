@@ -72,13 +72,16 @@ export class Renderer {
       pos: gl.getAttribLocation(prog, 'aPos'), norm: gl.getAttribLocation(prog, 'aNorm'),
       uv: gl.getAttribLocation(prog, 'aUv'), col: gl.getAttribLocation(prog, 'aCol'),
       mvp: U('uMvp'), model: U('uModel'), tex: U('uTex'), useTex: U('uUseTex'),
-      emissive: U('uEmissive'), sun: U('uSun'), fog: U('uFogColor'), horizon: U('uHorizon'),
+      emissive: U('uEmissive'), sun: U('uSun'), fog: U('uFogColor'), horizon: U('uHorizon'), zen: U('uZen'), mid: U('uMid'), amb: U('uAmb'),
       cam: U('uCam'), alpha: U('uAlpha'), sky: U('uSky'),
     };
     gl.enable(gl.DEPTH_TEST);
     gl.clearColor(0.99, 0.76, 0.56, 1.0);
     this.fogColor = [0.99, 0.80, 0.62];   // warm peach haze
     this.horizon = [1.0, 0.70, 0.47];     // golden horizon
+    this.zen = [0.42, 0.66, 0.92];        // sky zenith (soft blue)
+    this.mid = [0.98, 0.78, 0.58];        // mid-sky peach
+    this.ambScale = 1.0;                  // hemisphere ambient scale (late-dusk scenes dim it)
     this.sunDir = (() => { const v = [0.8, 0.25, -0.5]; const l = Math.hypot(...v); return v.map(x => x / l); })();
     this.textures = makeTextures(gl);
     console.log('WebGL Initialized: 60 FPS target');
@@ -111,6 +114,9 @@ export class Renderer {
     gl.uniform3fv(this.loc.sun, this.sunDir);
     gl.uniform3fv(this.loc.fog, this.fogColor);
     gl.uniform3fv(this.loc.horizon, this.horizon);
+    gl.uniform3fv(this.loc.zen, this.zen);
+    gl.uniform3fv(this.loc.mid, this.mid);
+    gl.uniform1f(this.loc.amb, this.ambScale);
     gl.uniform3fv(this.loc.cam, camPos);
     gl.uniform1i(this.loc.tex, 0);
     // sky dome first: huge inverted cube, depth write off
@@ -130,7 +136,7 @@ export class Renderer {
     gl.uniform1f(this.loc.sky, opts.sky ? 1 : 0);
     gl.uniform1f(this.loc.alpha, opts.alpha != null ? opts.alpha : 1);
     if (opts.alpha != null && opts.alpha < 1) {
-      gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, opts.add ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
       gl.depthMask(false);
     }
     if (opts.tex) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.textures[opts.tex]); }
@@ -153,6 +159,6 @@ export class Renderer {
     const model = (opts.pitch || opts.roll)
       ? mat4ModelPose(x, y, z, ry, opts.pitch || 0, opts.roll || 0, w, h, 0.03)
       : mat4Model(x, y, z, ry, w, h, 0.03);
-    this.draw(this._panelMesh, model, { tex: texKey, emissive: true });
+    this.draw(this._panelMesh, model, { tex: texKey, emissive: true, alpha: opts.alpha, add: opts.add });
   }
 }

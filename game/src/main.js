@@ -17,7 +17,7 @@ import { loadProfile, saveProfile } from './game/storage.js';
 const canvas = document.getElementById('gl');
 const R = new Renderer(canvas);
 const ui = {};
-for (const id of ['hud','health','armor','cash','stars','weapon','banner','msg','minimap','speed','bustbar','bustfill','overlay','ovTitle','ovSub','ovFeat','ovSave','mission','dispatch','slots','district','timer','prompt','vignette','respectfill','rank'])
+for (const id of ['hud','health','armor','cash','stars','weapon','banner','msg','minimap','speed','bustbar','bustfill','overlay','ovTitle','ovSub','ovFeat','ovSave','mission','dispatch','slots','district','timer','prompt','vignette','speedfx','respectfill','rank'])
   ui[id] = document.getElementById(id);
 const mm = ui.minimap.getContext('2d');
 
@@ -91,7 +91,12 @@ function buildCityMeshes(s) {
   }
   for (const pr of city.props) {
     if (pr.kind === 'bin') plain.box(pr.x, 0, pr.z, 0.6, 1.0, 0.6, [0.25, 0.5, 0.35]);
-    else if (pr.kind === 'barrier') plain.box(pr.x, 0, pr.z, 1.8, 0.8, 0.3, [0.95, 0.5, 0.15]);
+    else if (pr.kind === 'barrier') {
+      plain.box(pr.x, 0, pr.z, 1.8, 0.75, 0.3, [0.92, 0.92, 0.94]);
+      plain.box(pr.x, 0.42, pr.z + 0.16, 1.8, 0.2, 0.02, [0.85, 0.12, 0.16]);
+      plain.box(pr.x, 0.42, pr.z - 0.16, 1.8, 0.2, 0.02, [0.85, 0.12, 0.16]);
+      plain.box(pr.x, 0.75, pr.z, 0.24, 0.18, 0.24, [1, 0.55, 0.1]);
+    }
     else if (pr.kind === 'hydrant') plain.box(pr.x, 0, pr.z, 0.35, 0.7, 0.35, [0.9, 0.2, 0.2]);
     else plain.box(pr.x, 0, pr.z, 0.9, 0.9, 0.9, pr.color);
   }
@@ -110,7 +115,7 @@ function buildCityMeshes(s) {
     signs: city.signs, lights: city.lights,
   };
 }
-const MESH = buildCityMeshes(S);
+let MESH = buildCityMeshes(S);
 
 // ---------- particles & decals ----------
 const particles = [];
@@ -151,7 +156,7 @@ function drawCar(s, car, t, interior = false) {
   const style = car.kind === 'cop' ? 'police' : (car.style || 'sedan');
   if (car.kind === 'cop') {
     const ph = Math.floor(t * 5 + car.id) % 2 === 0;
-    R.box(x + fx * 0.5, 0.1, z + fz * 0.5, ry, 3.4, 0.04, 5.2, ph ? [1, 0.1, 0.15] : [0.2, 0.4, 1], { alpha: 0.20 });
+    R.box(x + fx * 0.5, 0.1, z + fz * 0.5, ry, 3.4, 0.04, 5.2, ph ? [1, 0.07, 0.13] : [0.07, 0.4, 1], { alpha: 0.26 });
   }
   const body = car.kind === 'dead' ? [0.15, 0.14, 0.16] : car.color;
   const glass = [0.13, 0.18, 0.24], dark = [0.08, 0.08, 0.1];
@@ -194,8 +199,10 @@ function drawCar(s, car, t, interior = false) {
     }
     P(2.28, 0, 0.45, 0.35, 0.5, 0.18, black);                // push bar
     const ph = Math.floor(t * 5 + car.id) % 2 === 0;
-    P(0, -0.34, 1.46, 0.62, 0.16, 0.42, ph ? [1, 0.12, 0.18] : [0.3, 0.3, 0.35], { emissive: true }); // light bar red
-    P(0, 0.34, 1.46, 0.62, 0.16, 0.42, ph ? [0.3, 0.3, 0.35] : [0.25, 0.45, 1], { emissive: true });  // light bar blue
+    P(0, -0.34, 1.46, 0.62, 0.16, 0.42, ph ? [1, 0.07, 0.13] : [0.3, 0.3, 0.35], { emissive: true }); // light bar red #ff1122
+    P(0, 0.34, 1.46, 0.62, 0.16, 0.42, ph ? [0.3, 0.3, 0.35] : [0.07, 0.4, 1], { emissive: true });  // light bar blue #1166ff
+    P(0, -0.34, 1.80, 1.15, 0.5, 0.75, [1, 0.07, 0.13], { emissive: true, alpha: ph ? 0.34 : 0.05, add: true }); // red halo
+    P(0, 0.34, 1.80, 1.15, 0.5, 0.75, [0.07, 0.4, 1], { emissive: true, alpha: ph ? 0.05 : 0.34, add: true });  // blue halo
     wheels(0.34, 0.34, 0.28, 1.4, 1.4);
     P(2.16, -0.6, 0.55, 0.4, 0.2, 0.1, hl, { emissive: true });
     P(2.16, 0.6, 0.55, 0.4, 0.2, 0.1, hl, { emissive: true });
@@ -231,55 +238,78 @@ function drawInterior(s, car) {
   const fx = Math.sin(car.ry), fz = Math.cos(car.ry);
   const rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
   const at = (f, r, y) => [car.x + fx * f + rx * r, y, car.z + fz * f + rz * r];
-  let q = at(1.02, 0, 0.78);
-  R.box(q[0], q[1], q[2], car.ry, 2.05, 0.26, 0.42, [0.09, 0.09, 0.12]);
-  q = at(1.06, 0, 0.93);
-  R.box(q[0], q[1], q[2], car.ry, 2.05, 0.05, 0.38, [0.16, 0.15, 0.2]);
-  // live instrument cluster (canvas texture, needles track speed/rpm)
-  q = at(1.36, -0.05, 0.95);
-  R.panel(q[0], q[1], q[2], car.ry, 0.88, 0.42, 'dash', { pitch: -0.18 });
-  // steering wheel: ring (r=0.15) + three spokes, rotation = steer x 3.2;
-  // seated low and left-of-centre on the driver's axis, no hand blocks
+  const DARK = [0.13, 0.14, 0.17], DARK2 = [0.19, 0.21, 0.26]; // dash greys, separated enough to read
+  let q;
+  // hood sliver through the windshield base, in body colour: seat position
+  q = at(1.80, -0.2, 0.90);
+  R.box(q[0], q[1], q[2], car.ry, 2.3, 0.10, 1.15, car.color || [0.7, 0.2, 0.3]);
+  // dashboard: two full-width stepped slabs, no side gaps. The driver-side
+  // face sits at f=0.97; the cluster mounts ON that face (an earlier build
+  // put it on the windshield side, where only its top floated into view).
+  q = at(1.15, -0.2, 0.79);
+  R.box(q[0], q[1], q[2], car.ry, 4.4, 0.46, 0.36, DARK);
+  q = at(1.22, -0.2, 0.95);
+  R.box(q[0], q[1], q[2], car.ry, 4.4, 0.14, 0.24, DARK2);
+  // matte silver trim strip on the passenger side of the dash face
+  q = at(0.955, 0.45, 0.97);
+  R.box(q[0], q[1], q[2], car.ry, 0.95, 0.02, 0.012, [0.62, 0.64, 0.68]);
+  // instrument cluster sunk low: housing + live dash panel (face tilted up
+  // 12deg to the driver), top edge inside the bottom quarter of the frame
+  q = at(0.945, -0.02, 0.778);
+  R.box(q[0], q[1], q[2], car.ry, 0.74, 0.36, 0.07, [0.09, 0.09, 0.11]);
+  q = at(0.90, -0.02, 0.778);
+  R.panel(q[0], q[1], q[2], car.ry, 0.64, 0.30, 'dash', { pitch: -0.21 });
+  // trapezoid hood shading the cluster
+  q = at(1.02, -0.02, 1.00);
+  R.box(q[0], q[1], q[2], car.ry, 0.86, 0.06, 0.32, DARK, { pitch: -0.38 });
+  // steering wheel, left-hand drive (~34% frame width): thin ring (outer
+  // diameter 0.31, tube 0.03), hub cap, spokes at 9 / 3 / 6 o'clock, NO hands.
   const wheelRoll = -(car.phys ? car.phys.steerAngle : 0) * 3.2;
-  const wc = at(0.80, -0.12, 0.78);
+  const wc = at(0.80, -0.05, 0.84);
   const wob = (dx, dy) => {
     const cr = Math.cos(wheelRoll), sr = Math.sin(wheelRoll);
     const lx = dx * cr - dy * sr, ly = dx * sr + dy * cr;
     return [wc[0] + rx * lx, wc[1] + ly, wc[2] + rz * lx];
   };
-  const rimC = [0.13, 0.13, 0.15], spokeC = [0.22, 0.22, 0.25];
+  const rimC = [0.20, 0.20, 0.23], spokeC = [0.30, 0.30, 0.34];
   let b;
-  // ring: 12 short segments approximating a circle
-  for (let i = 0; i < 12; i++) {
-    const a = i / 12 * Math.PI * 2;
-    b = wob(Math.cos(a) * 0.15, Math.sin(a) * 0.15);
-    R.box(b[0], b[1], b[2], car.ry, 0.10, 0.042, 0.045, rimC, { pitch: -0.32, roll: wheelRoll + a + Math.PI / 2 });
+  for (let i = 0; i < 16; i++) {
+    const a = i / 16 * Math.PI * 2;
+    b = wob(Math.cos(a) * 0.14, Math.sin(a) * 0.14);
+    R.box(b[0], b[1], b[2], car.ry, 0.085, 0.03, 0.032, rimC, { pitch: -0.32, roll: wheelRoll + a + Math.PI / 2 });
   }
-  // three spokes: down, lower-left, lower-right (classic 3-spoke layout)
-  for (const a of [-Math.PI / 2, -Math.PI / 2 - 2.1, -Math.PI / 2 + 2.1]) {
+  for (const a of [0, Math.PI, -Math.PI / 2]) {
     b = wob(Math.cos(a) * 0.082, Math.sin(a) * 0.082);
-    R.box(b[0], b[1], b[2], car.ry, 0.17, 0.038, 0.05, spokeC, { pitch: -0.32, roll: wheelRoll + a });
+    R.box(b[0], b[1], b[2], car.ry, 0.115, 0.026, 0.04, spokeC, { pitch: -0.32, roll: wheelRoll + a });
   }
-  b = wob(0, 0); R.box(b[0], b[1], b[2], car.ry, 0.095, 0.095, 0.08, [0.16, 0.16, 0.19], { pitch: -0.32, roll: wheelRoll });
-  for (const sd of [-1, 1]) {
-    q = at(0.92, sd * 1.02, 1.3);
-    R.box(q[0], q[1], q[2], car.ry, 0.24, 0.13, 0.05, [0.08, 0.08, 0.1]);
-    q = at(0.9, sd * 1.01, 1.3);
-    R.box(q[0], q[1], q[2], car.ry, 0.19, 0.09, 0.02, [0.75, 0.85, 0.95], { emissive: true });
-  }
+  b = wob(0, 0); R.box(b[0], b[1], b[2], car.ry, 0.10, 0.10, 0.06, [0.22, 0.22, 0.26], { pitch: -0.32, roll: wheelRoll });
+  b = wob(0, 0); R.box(b[0], b[1], b[2], car.ry, 0.055, 0.055, 0.07, [0.32, 0.32, 0.37], { pitch: -0.32, roll: wheelRoll });
+  // steering column
+  q = at(0.58, -0.05, 0.70);
+  R.box(q[0], q[1], q[2], car.ry, 0.08, 0.08, 0.42, [0.09, 0.09, 0.11], { pitch: -0.32 });
+  // A-pillars at the screen edges, tops tilted inward ~17deg
+  q = at(1.16, 1.04, 1.42);
+  R.box(q[0], q[1], q[2], car.ry, 0.11, 1.30, 0.055, DARK, { pitch: -0.18, roll: 0.30 });
+  q = at(1.16, -1.72, 1.42);
+  R.box(q[0], q[1], q[2], car.ry, 0.11, 1.30, 0.055, DARK, { pitch: -0.18, roll: -0.30 });
+  // roof front beam across the top edge
+  q = at(1.24, -0.35, 2.00);
+  R.box(q[0], q[1], q[2], car.ry, 3.6, 0.10, 0.12, [0.08, 0.085, 0.10]);
+  // rear-view mirror: 3.2:1, thin frame, stalk to the beam, dark blue-grey
+  // glass with one diagonal white glint
+  q = at(1.24, -0.32, 1.965);
+  R.box(q[0], q[1], q[2], car.ry, 0.03, 0.075, 0.03, [0.07, 0.07, 0.09]);
+  q = at(1.26, -0.32, 1.90);
+  R.box(q[0], q[1], q[2], car.ry, 0.34, 0.105, 0.035, [0.07, 0.07, 0.09]);
+  q = at(1.235, -0.32, 1.90);
+  R.box(q[0], q[1], q[2], car.ry, 0.30, 0.08, 0.012, [0.15, 0.21, 0.29], { emissive: true });
+  q = at(1.23, -0.32, 1.90);
+  R.box(q[0], q[1], q[2], car.ry, 0.13, 0.010, 0.014, [0.55, 0.65, 0.78], { emissive: true, roll: 0.45 });
   // centre console + gear knob between the seats
   q = at(0.35, 0.18, 0.42);
-  R.box(q[0], q[1], q[2], car.ry, 0.42, 0.3, 1.1, [0.11, 0.11, 0.14]);
+  R.box(q[0], q[1], q[2], car.ry, 0.42, 0.3, 1.1, DARK);
   q = at(0.55, 0.18, 0.6);
   R.box(q[0], q[1], q[2], car.ry, 0.07, 0.16, 0.07, [0.2, 0.2, 0.24]);
-  // rear-view mirror, small and tight to the top edge (two-tone reflection)
-  q = at(1.06, -0.02, 1.80);
-  R.box(q[0], q[1], q[2], car.ry, 0.36, 0.11, 0.04, [0.07, 0.07, 0.09]);
-  q = at(1.03, -0.02, 1.838);
-  R.box(q[0], q[1], q[2], car.ry, 0.30, 0.035, 0.02, [0.62, 0.78, 0.94], { emissive: true });
-  q = at(1.03, -0.02, 1.762);
-  R.box(q[0], q[1], q[2], car.ry, 0.30, 0.035, 0.02, [0.42, 0.42, 0.46], { emissive: true });
-  // (roof brow / sun-visor band removed entirely: it ate the top of the frame)
 }
 function drawGunView(s, eye, viewYaw, viewPitch, lowered = false) {
   const d = viewDir(viewYaw, viewPitch);
@@ -335,25 +365,38 @@ function drawHeli(s, t) {
   const h = s.heli, p = s.player;
   const x = h.x, z = h.z, y = h.h || 28;
   const ry = h.ry != null ? h.ry : Math.atan2(p.x - x, p.z - z); // staged shots may pin a broadside aspect
-  R.box(x, y, z, ry, 2.6, 2.2, 6.4, [0.18, 0.2, 0.27]);
-  R.box(x, y - 0.2, z, ry, 2.65, 0.5, 6.0, [0.92, 0.92, 0.95]);
-  R.box(x, y + 0.25, z, ry, 2.2, 1.1, 2.0, [0.65, 0.8, 0.92], { emissive: true });
+  const pose = { pitch: -0.26, roll: 0.17 }; // nose-down 15deg, 10deg bank (Gemini P0-2)
+  R.box(x, y, z, ry, 2.6, 2.2, 6.4, [0.32, 0.35, 0.44], pose);
+  const hrx = Math.cos(ry), hrz = -Math.sin(ry);
+  R.box(x - hrx * 1.35, y - 0.1, z - hrz * 1.35, ry, 0.20, 0.20, 0.20, [1, 0.10, 0.15], { emissive: true });
+  R.box(x + hrx * 1.35, y - 0.1, z + hrz * 1.35, ry, 0.20, 0.20, 0.20, [0.15, 1, 0.35], { emissive: true });
+  R.box(x - Math.sin(ry) * 7.9, y + 1.1, z - Math.cos(ry) * 7.9, ry, 0.16, 0.16, 0.16, [1, 1, 1], { emissive: true }); // tail strobe
+  R.box(x, y - 0.2, z, ry, 2.65, 0.5, 6.0, [0.92, 0.92, 0.95], pose);
+  R.box(x, y + 0.25, z, ry, 2.2, 1.1, 2.0, [0.65, 0.8, 0.92], { emissive: true, ...pose });
   const bx = Math.sin(ry), bz = Math.cos(ry);
-  R.box(x - bx * 5.4, y + 0.6, z - bz * 5.4, ry, 0.55, 0.8, 5.0, [0.22, 0.24, 0.31]);
-  R.box(x - bx * 7.8, y + 1.1, z - bz * 7.8, ry, 0.2, 1.7, 1.2, [0.22, 0.24, 0.31]);
+  R.box(x - bx * 5.4, y + 0.6, z - bz * 5.4, ry, 0.55, 0.8, 5.0, [0.22, 0.24, 0.31], pose);
+  R.box(x - bx * 7.8, y + 1.1, z - bz * 7.8, ry, 0.2, 1.7, 1.2, [0.22, 0.24, 0.31], pose);
+  // rotor: translucent blur disc (opacity 0.28) + two soft blade bars
+  R.box(x, y + 1.5, z, ry, 13.5, 0.05, 13.5, [0.10, 0.10, 0.12], { alpha: 0.28, ...pose });
   const spin = t * 42;
-  R.box(x, y + 1.5, z, spin, 13.5, 0.09, 0.55, [0.12, 0.12, 0.16]);
-  R.box(x, y + 1.5, z, spin + Math.PI / 2, 13.5, 0.09, 0.55, [0.12, 0.12, 0.16], { alpha: 0.7 });
+  R.box(x, y + 1.52, z, spin, 13.5, 0.07, 0.55, [0.12, 0.12, 0.16], { alpha: 0.45 });
+  R.box(x, y + 1.52, z, spin + Math.PI / 2, 13.5, 0.07, 0.55, [0.12, 0.12, 0.16], { alpha: 0.45 });
   R.box(x - bx * 7.8, y + 1.1, z - bz * 7.8, ry, 1.8, 0.13, 0.32, [0.15, 0.15, 0.19], { roll: t * 55 });
-  R.box(x - bx * 1.6, y - 1.45, z - bz * 1.6, ry, 3.0, 0.18, 0.34, [0.3, 0.3, 0.34]);
-  // spotlight: beam from belly to the player + pool on the ground
-  const dx = p.x - x, dz = p.z - z;
-  const dist = Math.hypot(dx, dz, y);
+  R.box(x - bx * 1.6, y - 1.45, z - bz * 1.6, ry, 3.0, 0.18, 0.34, [0.3, 0.3, 0.34], pose);
+  // spotlight: 3-slab volumetric cone (additive, no depth) from the belly to
+  // the pool point (the player, or a staged point in shot scenes), plus a
+  // radial-gradient ground pool.
+  const tp = s.spotTarget || p;
+  const sx = x, sy = y - 1.3, sz = z;
+  const dx = tp.x - sx, dz = tp.z - sz;
+  const dist = Math.hypot(dx, dz, sy);
   const myaw = Math.atan2(dx, dz);
-  const mpitch = Math.atan2(Math.hypot(dx, dz), y);
-  R.box((x + p.x) / 2, y / 2 + 0.5, (z + p.z) / 2, myaw, 2.4, dist, 2.4, [1, 0.98, 0.85], { alpha: 0.22, pitch: -mpitch });
-  R.box(p.x, 0.22, p.z, 0, 9.5, 0.06, 9.5, [1, 0.98, 0.85], { alpha: 0.45 });
-  R.box(p.x, 0.24, p.z, 0, 4.2, 0.06, 4.2, [1, 1, 0.95], { alpha: 0.35 });
+  const mpitch = Math.atan2(Math.hypot(dx, dz), sy);
+  for (const [fr, wdt] of [[0.18, 1.5], [0.5, 3.6], [0.82, 6.2]]) {
+    R.box(sx + dx * fr, sy * (1 - fr) + 0.3, sz + dz * fr, myaw, wdt, dist / 3.1, wdt, [1, 0.97, 0.82], { alpha: 0.15, pitch: -mpitch, add: true });
+  }
+  R.panel(tp.x, 0.07, tp.z, 0, 11.5, 11.5, 'pool', { pitch: -Math.PI / 2, alpha: 0.6, add: true });
+  R.box(tp.x, 0.09, tp.z, 0, 3.8, 0.05, 3.8, [1, 1, 0.95], { alpha: 0.30, add: true });
 }
 
 // ---------- render ----------
@@ -367,11 +410,19 @@ function render(s, t) {
   else cam = rig.foot(s, s.camYaw, lookPitch, t);
   const proj = mat4Perspective(cam.fov, w / h, 0.05, 900);
   const view = mat4LookAt(cam.eye, cam.center, cam.up);
+  // Late-dusk grade for the chase still only: deep blue-purple zenith, dark
+  // orange horizon, halved ambient — police lights and the spotlight carry it.
+  const lateDusk = s.shotMode === 'chase';
+  R.zen = lateDusk ? [0.15, 0.13, 0.36] : [0.42, 0.66, 0.92];
+  R.mid = lateDusk ? [0.60, 0.30, 0.24] : [0.98, 0.78, 0.58];
+  R.horizon = lateDusk ? [0.82, 0.36, 0.15] : [1.0, 0.70, 0.47];
+  R.fogColor = lateDusk ? [0.48, 0.30, 0.30] : [0.99, 0.80, 0.62];
+  R.ambScale = lateDusk ? 0.62 : 1.0;
   R.begin(view, proj, cam.eye);
   R.draw(MESH.plain, IDM);
   R.draw(MESH.road, IDM, { tex: 'road' });
   R.draw(MESH.walk, IDM, { tex: 'walk' });
-  for (let i = 0; i < 4; i++) R.draw(MESH.tex[i], IDM, { tex: 'b' + i });
+  for (let i = 0; i < 4; i++) R.draw(MESH.tex[i], IDM, { tex: s.shotMode === 'chase' ? 'b4' : 'b' + i });
   R.draw(MESH.lampDots, IDM, { emissive: true });
   for (const sg of MESH.signs) R.box(sg.x, sg.y, sg.z, sg.ry, sg.w, sg.h, 0.18, sg.color);
   for (const l of MESH.lights) R.box(l.x, 4.4, l.z, 0, 2.6, 0.05, 2.6, [1, 0.8, 0.45], { alpha: 0.10 });
@@ -518,6 +569,8 @@ function setupShot(kind) {
   lookPitch = kind === 'start' ? -0.03 : 0.02;
   for (const sk of fx0.skids) skids.push(sk);
   for (const pf of fx0.puffs) spawnP(pf.x, pf.y, pf.z, pf.vx, pf.vy, pf.vz, pf.life, pf.size, pf.color);
+  if (fx0.barriers) { for (const bp of fx0.barriers) s.city.props.push(bp); MESH = buildCityMeshes(s); }
+  document.getElementById('help').style.display = 'none'; // clean stills: no key help
   if (kind === 'chase') ui.vignette.style.opacity = '0.85';
 }
 

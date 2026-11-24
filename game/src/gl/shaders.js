@@ -17,13 +17,13 @@ export const FS = `
 precision mediump float;
 varying vec3 vNorm; varying vec2 vUv; varying vec3 vCol; varying float vDist; varying vec3 vWp;
 uniform sampler2D uTex; uniform float uUseTex; uniform float uEmissive; uniform float uAlpha; uniform float uSky;
-uniform vec3 uSun; uniform vec3 uFogColor; uniform vec3 uHorizon; uniform vec3 uCam;
+uniform vec3 uSun; uniform vec3 uFogColor; uniform vec3 uHorizon; uniform vec3 uCam; uniform vec3 uZen; uniform vec3 uMid; uniform float uAmb;
 void main(){
   if (uSky > 0.5) {
     // Miami dusk: peach-orange horizon melting up into soft sky blue.
     float h = clamp(normalize(vWp - uCam).y * 1.3 + 0.34, 0.0, 1.0);
-    vec3 zen = vec3(0.42, 0.66, 0.92);   // soft sky blue
-    vec3 mid = vec3(0.98, 0.78, 0.58);   // peach
+    vec3 zen = uZen;   // sky zenith (scene-driven: day dusk vs late dusk)
+    vec3 mid = uMid;   // mid-sky band
     vec3 nad = vec3(0.99, 0.68, 0.45);   // warm horizon glow
     vec3 col = mix(nad, mid, smoothstep(0.02, 0.42, h));
     col = mix(col, zen, smoothstep(0.45, 1.0, h));
@@ -39,7 +39,7 @@ void main(){
   vec3 n = normalize(vNorm);
   float diff = max(dot(n, normalize(uSun)), 0.0);
   // Hemisphere ambient: bright sky bounce, warm sand ground bounce.
-  vec3 hemi = mix(vec3(0.55,0.49,0.40), vec3(0.66,0.73,0.84), n.y * 0.5 + 0.5);
+  vec3 hemi = mix(vec3(0.55,0.49,0.40), vec3(0.66,0.73,0.84), n.y * 0.5 + 0.5) * uAmb;
   vec3 col = base * (hemi + 0.95 * diff * vec3(1.0,0.82,0.55)); // warm golden sunlight
   // Wet-surface sheen: strong low-angle specular on upward faces, tinted by base.
   vec3 v = normalize(uCam - vWp);

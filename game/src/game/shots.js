@@ -99,7 +99,7 @@ export function setupShotScene(s, kind) {
     let bestZ = -30, bestScore = Infinity;
     for (let z = -75; z <= 25; z += 5) {
       const eye = [roadC - 3.6 - 0.35, 1.22, z + 0.15];
-      const hx0 = roadC - 3.6 - 6, hz0 = z + 21, hh = 12.5, hry = 0.9;
+      const hx0 = roadC - 3.6 - 5, hz0 = z + 22, hh = 11.8, hry = 1.15;
       const hfx = Math.sin(hry), hfz = Math.cos(hry), hrx = Math.cos(hry), hrz = -Math.sin(hry);
       const hPts = [
         [hx0, hh, hz0],
@@ -123,14 +123,21 @@ export function setupShotScene(s, kind) {
     s.cops.push(mkCop(car.x - rx * 2.6 - fx * 2, car.z - rz * 2.6 - fz * 2, car.ry + 0.15));
     // Pursuit unit alongside ahead-left, fully in frame.
     s.cops.push(mkCop(car.x + fx * 9 + rx * 5.0, car.z + fz * 9 + rz * 5.0, car.ry + 0.05));
-    // 4-star roadblock: two cruisers angled nose-in across the road ahead.
-    for (const sd of [-3.0, 3.0]) {
-      const rb = mkCop(car.x + fx * 15 + rx * sd, car.z + fz * 15 + rz * sd, car.ry + Math.PI / 2 - Math.sign(sd) * 0.30);
+    // Near unit half-cut by the right frame edge at 5.5 m: foreground pressure.
+    const near = mkCop(car.x + fx * 5.5 - rx * 6.2, car.z + fz * 5.5 - rz * 6.2, car.ry - 0.5);
+    near.speed = 0;
+    s.cops.push(near);
+    // 4-star roadblock: two cruisers at 45 degrees, noses funnelled into the
+    // gap, striped barricades marking the gap edges.
+    for (const sd of [-3.4, 3.4]) {
+      const rb = mkCop(car.x + fx * 15 + rx * sd, car.z + fz * 15 + rz * sd, car.ry - Math.sign(sd) * Math.PI / 4);
       rb.roadblock = true; rb.speed = 0;
       s.cops.push(rb);
     }
     // Air unit high in the upper frame, broadside, spotlight on the player.
-    s.heli = { a: 0, h: 12.5, ry: car.ry + 0.9, x: car.x + fx * 21 - rx * 6, z: car.z + fz * 21 - rz * 6 };
+    s.heli = { a: 0, h: 11.8, ry: car.ry + 1.15, x: car.x + fx * 22 - rx * 5, z: car.z + fz * 22 - rz * 5 };
+    s.spotTarget = { x: car.x + fx * 8.5, z: car.z + fz * 8.5 }; // pool lands between player and roadblock
+    out.barriers = [1.7, -1.7].map(sd2 => ({ kind: 'barrier', x: car.x + fx * 15.3 + rx * sd2, z: car.z + fz * 15.3 + rz * sd2 }));
     // A burning wreck by the roadside for the explosion chain money-shot.
     const wreck = placeTrafficAt(s, 3, car.x + fx * 11 - rx * 8, car.z + fz * 11 - rz * 8, car.ry + 0.7, [0.3, 0.3, 0.34]);
     wreck.burning = 1.4; wreck.hp = 0;

@@ -134,6 +134,8 @@ export function updateHUD(s, ui, nearCarFn) {
       ? "PAY 'N SPRAY — $100 CLEARS STARS" : 'F — EXIT CAR · T — TAXI JOB · SPACE — DRIFT';
   }
   ui.prompt.textContent = prompt;
+  ui.prompt.style.display = s.shotMode ? 'none' : 'block'; // stills stay clean (no F/T prompt)
+  if (ui.speedfx) { const spd = car ? Math.abs(car.speed || 0) : 0; ui.speedfx.style.opacity = String(Math.max(0, Math.min(1, (spd - 20) / 30)) * 0.9); }
   const ov = { title: ['VICE BLOCKS 3D', 'PRESS ANY KEY TO HIT THE STREETS'], paused: ['PAUSED', 'Click or press Enter to resume'],
     busted: ['BUSTED', ''], wasted: ['WASTED', ''] }[s.mode];
   if (ui.ovFeat) {

@@ -34,6 +34,32 @@ export function makeTextures(gl) {
     }
     out['b' + vi] = canvasTex(gl, c, true);
   });
+  // Late-dusk facade: dim blue-grey walls, many windows lit warm/cool
+  // (the chase still swaps every building batch to this texture).
+  {
+    const c = document.createElement('canvas'); c.width = 128; c.height = 256;
+    const g = c.getContext('2d');
+    g.fillStyle = '#8a94ac'; g.fillRect(0, 0, 128, 256);
+    const rnd = lcg(4242);
+    const warm = ['#ffd98a', '#ffb36b', '#ffe9bb'], cool = ['#cfe9ff', '#9fd8ff'];
+    for (let y = 10; y < 246; y += 21) {
+      for (let x = 10; x < 118; x += 21) {
+        const r = rnd();
+        g.fillStyle = r < 0.34 ? warm[Math.floor(rnd() * warm.length)] : (r < 0.48 ? cool[Math.floor(rnd() * cool.length)] : '#232a36');
+        g.fillRect(x, y, 11, 12);
+      }
+    }
+    out.b4 = canvasTex(gl, c, true);
+  }
+  // Spotlight pool: radial gradient, white core fading to black (additive).
+  {
+    const c = document.createElement('canvas'); c.width = 128; c.height = 128;
+    const g = c.getContext('2d');
+    const gr = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+    gr.addColorStop(0, '#fffbe8'); gr.addColorStop(0.45, '#c9bd96'); gr.addColorStop(1, '#000000');
+    g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+    out.pool = canvasTex(gl, c, false);
+  }
   // Road: warm light-gray asphalt with grain, sun-bleached.
   {
     const c = document.createElement('canvas'); c.width = 256; c.height = 256;
