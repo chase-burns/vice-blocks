@@ -1,12 +1,12 @@
-// mesh.js — where all vertex data comes from. One interleaved layout is
-// shared by every vertex in the game, eleven floats wide:
+// mesh.js — the source of all vertex data. Every vertex in the game
+// uses one interleaved layout, eleven floats per vertex:
 //   position xyz | normal xyz | uv | colour rgb
-// unitCubeData produces a single tinted cube centred on the origin, which
-// dynamic props then scale and place. Builder accumulates static scenery
-// into one big buffer per material batch, keeping the city's draw calls
-// down to a handful.
+// unitCubeData emits a single tinted cube centred on the origin, which
+// dynamic props scale and position at draw time. Builder gathers static
+// scenery into one large buffer per material batch, so the whole city
+// costs only a handful of draw calls.
 
-const CUBE_FACES = [
+const FACE_TABLE = [
   [[0, 0, 1], [[-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5]]],
   [[0, 0, -1], [[0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, 0.5, -0.5], [0.5, 0.5, -0.5]]],
   [[1, 0, 0], [[0.5, -0.5, 0.5], [0.5, -0.5, -0.5], [0.5, 0.5, -0.5], [0.5, 0.5, 0.5]]],
@@ -14,52 +14,52 @@ const CUBE_FACES = [
   [[0, 1, 0], [[-0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, -0.5], [-0.5, 0.5, -0.5]]],
   [[0, -1, 0], [[-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, -0.5, 0.5], [-0.5, -0.5, 0.5]]],
 ];
-const FACE_UVS = [[0, 0], [1, 0], [1, 1], [0, 1]];
-const TWO_TRIS = [0, 1, 2, 0, 2, 3];
+const QUAD_UV = [[0, 0], [1, 0], [1, 1], [0, 1]];
+const TRI_ORDER = [0, 1, 2, 0, 2, 3];
 
 export function unitCubeData(color) {
-  const tint = color || [1, 1, 1];
-  const out = [];
-  for (const [normal, corners] of CUBE_FACES) {
-    for (const k of TWO_TRIS) {
-      out.push(corners[k][0], corners[k][1], corners[k][2]);
-      out.push(normal[0], normal[1], normal[2]);
-      out.push(FACE_UVS[k][0], FACE_UVS[k][1]);
-      out.push(tint[0], tint[1], tint[2]);
+  const rgb = color || [1, 1, 1];
+  const verts = [];
+  for (const [nrm, quad] of FACE_TABLE) {
+    for (const k of TRI_ORDER) {
+      verts.push(quad[k][0], quad[k][1], quad[k][2]);
+      verts.push(nrm[0], nrm[1], nrm[2]);
+      verts.push(QUAD_UV[k][0], QUAD_UV[k][1]);
+      verts.push(rgb[0], rgb[1], rgb[2]);
     }
   }
-  return new Float32Array(out);
+  return new Float32Array(verts);
 }
 
 export class Builder {
   constructor() { this.data = []; }
 
-  // One quad, emitted as two triangles. uvScale sets how many times the
-  // texture repeats across the face.
+  // Append one quad as two triangles. uvScale controls how many times
+  // the texture repeats across the face.
   quad(p1, p2, p3, p4, normal, color, uvScale) {
-    const s = uvScale === undefined ? 1 : uvScale;
-    const corners = [p1, p2, p3, p4];
-    const uvs = [[0, 0], [s, 0], [s, s], [0, s]];
-    for (const k of TWO_TRIS) {
-      const p = corners[k];
+    const rep = uvScale === undefined ? 1 : uvScale;
+    const pts = [p1, p2, p3, p4];
+    const uvs = [[0, 0], [rep, 0], [rep, rep], [0, rep]];
+    for (const k of TRI_ORDER) {
+      const p = pts[k];
       this.data.push(p[0], p[1], p[2], normal[0], normal[1], normal[2],
         uvs[k][0], uvs[k][1], color[0], color[1], color[2]);
     }
   }
 
-  // Axis-aligned box from a footprint. cy is the surface the box stands
-  // on, which matches how scenery code thinks about placing things.
+  // Axis-aligned box given its footprint; cy is the ground level the box
+  // sits on, matching how the scenery code prefers to place things.
   box(cx, cy, cz, w, h, d, color, uvRepeat) {
     const rep = uvRepeat || 0;
-    const x0 = cx - w / 2, x1 = cx + w / 2;
-    const y0 = cy, y1 = cy + h;
-    const z0 = cz - d / 2, z1 = cz + d / 2;
-    this.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], color, rep);
-    this.quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [0, 0, -1], color, rep);
-    this.quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [1, 0, 0], color, rep);
-    this.quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [-1, 0, 0], color, rep);
-    this.quad([x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0], [0, 1, 0], color, 0);
-    this.quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [0, -1, 0], color, 0);
+    const xa = cx - w / 2, xb = cx + w / 2;
+    const ya = cy, yb = cy + h;
+    const za = cz - d / 2, zb = cz + d / 2;
+    this.quad([xa, ya, zb], [xb, ya, zb], [xb, yb, zb], [xa, yb, zb], [0, 0, 1], color, rep);
+    this.quad([xb, ya, za], [xa, ya, za], [xa, yb, za], [xb, yb, za], [0, 0, -1], color, rep);
+    this.quad([xb, ya, zb], [xb, ya, za], [xb, yb, za], [xb, yb, zb], [1, 0, 0], color, rep);
+    this.quad([xa, ya, za], [xa, ya, zb], [xa, yb, zb], [xa, yb, za], [-1, 0, 0], color, rep);
+    this.quad([xa, yb, zb], [xb, yb, zb], [xb, yb, za], [xa, yb, za], [0, 1, 0], color, 0);
+    this.quad([xa, ya, za], [xb, ya, za], [xb, ya, zb], [xa, ya, zb], [0, -1, 0], color, 0);
   }
 
   build(renderer) { return renderer.makeMesh(new Float32Array(this.data)); }

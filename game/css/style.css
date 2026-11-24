@@ -1,8 +1,8 @@
-/* Vice Blocks 3D HUD styling — a warm dusk palette, gold and ice-blue
-   highlights, decal-leaning bars, dark pills behind text that has to stay
-   readable over bright streets, a scanline pass over everything, a
-   breathing centre banner, and fixed positioning throughout so every
-   element floats over the fullscreen game canvas. */
+/* Vice Blocks 3D — HUD stylesheet. A warm dusk palette with gold and
+   ice-blue accents, slanted decal-style bars, dark pills behind any text
+   that must stay legible over bright streets, a scanline overlay across
+   the whole frame, a gently pulsing centre banner, and fixed positioning
+   everywhere so each element floats above the fullscreen canvas. */
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: 100%; height: 100%; overflow: hidden; background: #1a0f1e; }

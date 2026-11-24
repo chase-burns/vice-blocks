@@ -1,5 +1,5 @@
-// state.js — assembles the entire game state, then advances it one tick
-// at a time in a fixed order: player, reload bookkeeping, the
+// state.js — assembles the entire game state, then advances it one
+// tick at a time in a fixed order: player, reload bookkeeping, the
 // fire/explosion chain, traffic, pedestrians, population density, the
 // wanted system, missions. It is pure logic — no DOM, no WebGL — so the
 // identical code runs headless under Node for smoke tests.
@@ -11,9 +11,9 @@ import * as wantedModule from './wanted.js';
 import * as playerModule from './player.js';
 import { stepMissions, startMission } from './missions.js';
 
-const TRAFFIC_POOL = 16;
-const PARKED_POOL = 10;
-const PED_POOL = 30;
+const TRAFFIC_COUNT = 16;
+const PARKED_COUNT = 10;
+const PED_COUNT = 30;
 
 export function createState(seed, saved) {
   const rng = makeRng(seed);
@@ -37,20 +37,20 @@ export function createState(seed, saved) {
   // between the logic modules.
   s.wantedAPI = { add: wantedModule.addWanted };
   s.playerAPI = { hurt: playerModule.hurt };
-  s.cars = spawnTraffic(rng, TRAFFIC_POOL).concat(spawnParked(rng, PARKED_POOL));
+  s.cars = spawnTraffic(rng, TRAFFIC_COUNT).concat(spawnParked(rng, PARKED_COUNT));
   for (const car of s.cars) {
-    const paintedLikeTaxi = car.color[0] > 0.9 && car.color[1] > 0.7 && car.color[2] < 0.3;
-    if (paintedLikeTaxi) car.style = 'taxi';
+    const looksTaxi = car.color[0] > 0.9 && car.color[1] > 0.7 && car.color[2] < 0.3;
+    if (looksTaxi) car.style = 'taxi';
     else if (rng.chance(0.24)) car.style = 'sport';
   }
-  const firstParkedCar = s.cars.find((c) => c.kind === 'parked');
-  if (firstParkedCar) firstParkedCar.style = 'sport';
-  for (let i = 0; i < PED_POOL; i++) s.peds.push(spawnPed(s, rng));
-  if (saved) restoreSave(s, saved);
+  const leadParked = s.cars.find((c) => c.kind === 'parked');
+  if (leadParked) leadParked.style = 'sport';
+  for (let i = 0; i < PED_COUNT; i++) s.peds.push(spawnPed(s, rng));
+  if (saved) applySave(s, saved);
   return s;
 }
 
-function restoreSave(s, saved) {
+function applySave(s, saved) {
   if (typeof saved.cash === 'number') s.cash = saved.cash;
   if (typeof saved.missionIdx === 'number') s.missionIdx = clamp(saved.missionIdx, 0, 8);
   s.hasGun = !!saved.hasGun;
@@ -63,14 +63,14 @@ function restoreSave(s, saved) {
   if (typeof saved.armor === 'number') s.armor = saved.armor;
 }
 
-export function drainEvents(s) { const drained = s.events; s.events = []; return drained; }
+export function drainEvents(s) { const out = s.events; s.events = []; return out; }
 
 // The burn chain: a wreck at zero health catches fire, burns for a few
 // seconds, then detonates — damaging nearby cars (which may catch and
 // blow in turn), scattering pedestrians and shaking the player.
 export function processBurning(s, dt) {
-  const allVehicles = s.cars.concat(s.cops);
-  for (const car of allVehicles) {
+  const fleet = s.cars.concat(s.cops);
+  for (const car of fleet) {
     if (car.kind === 'dead') continue;
     if (car.hp <= 0 && car.burning == null) {
       car.burning = car === s.player.inCar ? 3 : 2 + s.rng() * 2;
@@ -81,17 +81,17 @@ export function processBurning(s, dt) {
     if (car.burning > 0) continue;
     car.burning = 0; car.kind = 'dead'; car.speed = 0; car.smoke = 2;
     s.events.push({ name: 'explode', data: { x: car.x, z: car.z } });
-    for (const other of allVehicles) {
+    for (const other of fleet) {
       if (other !== car && other.kind !== 'dead' && dist2(other.x, other.z, car.x, car.z) < 9 * 9) damageCar(s, other, 45);
     }
     for (const ped of s.peds) {
       if (ped.state !== 'dead' && dist2(ped.x, ped.z, car.x, car.z) < 8 * 8) { ped.state = 'flee'; ped.t = 3; }
     }
-    const playerGap = Math.hypot(s.player.x - car.x, s.player.z - car.z);
-    if (playerGap < 10) {
-      s.trauma = Math.min(1, (s.trauma || 0) + (1 - playerGap / 10) * 0.8);
+    const gapToPlayer = Math.hypot(s.player.x - car.x, s.player.z - car.z);
+    if (gapToPlayer < 10) {
+      s.trauma = Math.min(1, (s.trauma || 0) + (1 - gapToPlayer / 10) * 0.8);
       if (s.player.inCar) damageCar(s, s.player.inCar, 30);
-      else if (playerGap < 7) s.playerAPI.hurt(s, 30);
+      else if (gapToPlayer < 7) s.playerAPI.hurt(s, 30);
     }
     if (car === s.player.inCar) { s.player.inCar = null; s.playerAPI.hurt(s, 55); }
   }
@@ -101,24 +101,24 @@ export function processBurning(s, dt) {
 // and four traffic cars within 60 m, recycled in from across the city.
 export function manageDensity(s) {
   const p = s.player;
-  let pedsNearby = 0; const pedsFar = [];
+  let nearPeds = 0; const farPeds = [];
   for (const ped of s.peds) {
     const d = dist2(ped.x, ped.z, p.x, p.z);
-    if (d < 60 * 60) pedsNearby++;
-    else if (d > 95 * 95 && ped.state === 'walk') pedsFar.push(ped);
+    if (d < 60 * 60) nearPeds++;
+    else if (d > 95 * 95 && ped.state === 'walk') farPeds.push(ped);
   }
-  for (let i = 0; pedsNearby < 5 && i < pedsFar.length; i++, pedsNearby++) placePedNear(s, pedsFar[i], s.rng);
-  let carsNearby = 0; const carsFar = [];
+  for (let i = 0; nearPeds < 5 && i < farPeds.length; i++, nearPeds++) placePedNear(s, farPeds[i], s.rng);
+  let nearCars = 0; const farCars = [];
   for (const car of s.cars) {
     if (car.kind !== 'traffic') continue;
     const d = dist2(car.x, car.z, p.x, p.z);
-    if (d < 60 * 60) carsNearby++;
-    else if (d > 100 * 100) carsFar.push(car);
+    if (d < 60 * 60) nearCars++;
+    else if (d > 100 * 100) farCars.push(car);
   }
-  for (let i = 0; carsNearby < 4 && i < carsFar.length; i++, carsNearby++) placeCarNear(s, carsFar[i], s.rng);
+  for (let i = 0; nearCars < 4 && i < farCars.length; i++, nearCars++) placeCarNear(s, farCars[i], s.rng);
 }
 
-function tickShortTimers(s, dt) {
+function decayTimers(s, dt) {
   if (s.bannerT > 0) s.bannerT -= dt;
   if (s.msgT > 0) s.msgT -= dt;
   if (s.gunfireT > 0) s.gunfireT -= dt;
@@ -130,25 +130,25 @@ function tickShortTimers(s, dt) {
 
 export function step(s, input, dt) {
   s.time += dt;
-  tickShortTimers(s, dt);
+  decayTimers(s, dt);
   if (s.mode !== 'play') return;
   if (!s.mission && !s.taxi && s.missionIdx === 0 && !s._metContact) {
-    const contactZone = s.city.zones.contact;
-    if (dist2(s.player.x, s.player.z, contactZone.x, contactZone.z) < contactZone.r * contactZone.r) { s._metContact = true; startMission(s); }
+    const zone = s.city.zones.contact;
+    if (dist2(s.player.x, s.player.z, zone.x, zone.z) < zone.r * zone.r) { s._metContact = true; startMission(s); }
   }
   const p = s.player;
   if (p.inCar) playerModule.stepPlayerCar(s, input, dt);
   else playerModule.stepPlayerFoot(s, input, dt);
   playerModule.stepZonesCar(s, dt);
-  const activeDef = playerModule.WEAPONS[playerModule.activeWeapon(s)];
+  const def = playerModule.WEAPONS[playerModule.activeWeapon(s)];
   if (s.reloadT > 0) {
     s.reloadT -= dt;
     if (s.reloadT <= 0 && s.reserve > 0) {
-      const roundsMoved = Math.min(activeDef.size - s[activeDef.mag], s.reserve);
-      s[activeDef.mag] += roundsMoved; s.reserve -= roundsMoved;
+      const moved = Math.min(def.size - s[def.mag], s.reserve);
+      s[def.mag] += moved; s.reserve -= moved;
     }
   }
-  if (input.reload && s.hasGun && s[activeDef.mag] < activeDef.size && s.reserve > 0 && s.reloadT <= 0) s.reloadT = 0.9;
+  if (input.reload && s.hasGun && s[def.mag] < def.size && s.reserve > 0 && s.reloadT <= 0) s.reloadT = 0.9;
   processBurning(s, dt);
   for (const car of s.cars) if (car !== p.inCar && car.kind === 'traffic') stepTrafficCar(s, car, dt);
   for (const ped of s.peds) stepPed(s, ped, dt);
@@ -156,9 +156,9 @@ export function step(s, input, dt) {
   while (s.peds.length < 28) s.peds.push(spawnPed(s, s.rng));
   s.densityT = (s.densityT || 0) - dt;
   if (s.densityT <= 0) { s.densityT = 0.6; manageDensity(s); }
-  const wantedBefore = s.wanted;
+  const starsBefore = s.wanted;
   wantedModule.stepWanted(s, dt);
-  if (wantedBefore >= 2 && s.wanted === 0 && s.mode === 'play') {
+  if (starsBefore >= 2 && s.wanted === 0 && s.mode === 'play') {
     s.respect += 40;
     s.events.push({ name: 'respect', data: s.respect });
     s.msg = 'CLEAN GETAWAY — RESPECT +40'; s.msgT = 2;

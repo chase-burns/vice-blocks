@@ -1,24 +1,24 @@
-// serve.ts — minimal static server for trying the game locally.
+// serve.ts — a tiny static file server for playing the game locally.
 //
 //   node serve.ts [--port N]
 //
-// Then visit the printed localhost address in a browser.
+// Open the localhost address it prints in your browser.
 
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const rootDir = fileURLToPath(new URL('./game/', import.meta.url));
+const serveRoot = fileURLToPath(new URL('./game/', import.meta.url));
 
-let port = 5173;
-const args = process.argv.slice(2);
-for (let i = 0; i < args.length; i++) {
-  if (args[i] === '--port') port = Number(args[++i]) || port;
-  else if (args[i].startsWith('--port=')) port = Number(args[i].slice(7)) || port;
+let listenPort = 5173;
+const cliArgs = process.argv.slice(2);
+for (let i = 0; i < cliArgs.length; i++) {
+  if (cliArgs[i] === '--port') listenPort = Number(cliArgs[++i]) || listenPort;
+  else if (cliArgs[i].startsWith('--port=')) listenPort = Number(cliArgs[i].slice(7)) || listenPort;
 }
 
-const MIME_TYPES: Record<string, string> = {
+const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -30,24 +30,24 @@ const MIME_TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
 };
 
-const server = createServer(async (req, res) => {
+const httpServer = createServer(async (req, res) => {
   try {
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    let pathname = decodeURIComponent(url.pathname);
-    if (pathname.endsWith('/')) pathname += 'index.html';
+    const parsedUrl = new URL(req.url ?? '/', 'http://localhost');
+    let requestPath = decodeURIComponent(parsedUrl.pathname);
+    if (requestPath.endsWith('/')) requestPath += 'index.html';
 
-    const target = normalize(join(rootDir, pathname));
-    if (!target.startsWith(rootDir)) { res.writeHead(403).end('forbidden'); return; }
+    const filePath = normalize(join(serveRoot, requestPath));
+    if (!filePath.startsWith(serveRoot)) { res.writeHead(403).end('forbidden'); return; }
 
-    const body = await readFile(target);
-    res.writeHead(200, { 'content-type': MIME_TYPES[extname(target).toLowerCase()] ?? 'application/octet-stream' });
-    res.end(body);
+    const fileBody = await readFile(filePath);
+    res.writeHead(200, { 'content-type': CONTENT_TYPES[extname(filePath).toLowerCase()] ?? 'application/octet-stream' });
+    res.end(fileBody);
   } catch {
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
     res.end('not found');
   }
 });
 
-server.listen(port, '127.0.0.1', () => {
-  console.log(`Vice Blocks 3D dev server: http://127.0.0.1:${port}/`);
+httpServer.listen(listenPort, '127.0.0.1', () => {
+  console.log(`Vice Blocks 3D dev server: http://127.0.0.1:${listenPort}/`);
 });

@@ -1,12 +1,13 @@
-// shaders.js — one hand-written shader pair serves the whole game
-// (WebGL1). The vertex stage transforms the point, passes normal, uv and
-// colour along, and records world position plus a clip-space distance
-// the fragment stage uses for fog. The fragment stage has two modes:
-// sky mode blends a warm horizon glow through the mid and zenith bands
-// and smears the sun across them; surface mode lights vertex colour (or
-// a texture sample) with a warm sun over hemisphere ambient, lays an
-// up-facing sheen on top, honours emissive, and finishes with peach
-// exponential fog that drifts toward the horizon colour near eye level.
+// shaders.js — a single hand-written shader pair drives the entire
+// game (WebGL1). The vertex stage transforms the point, forwards the
+// normal, uv and colour, and records the world position together with a
+// clip-space distance the fragment stage uses for fog. The fragment
+// stage has two modes: sky mode blends a warm horizon glow through the
+// mid and zenith bands and smears the sun across them; surface mode
+// lights the vertex colour (or a texture sample) with a warm sun over
+// hemisphere ambient, lays an up-facing sheen on top, honours emissive,
+// and finishes with peach exponential fog that leans toward the horizon
+// colour near eye level.
 
 export const VS = `
 attribute vec3 aPos;
