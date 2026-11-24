@@ -2,8 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<!-- Vice Blocks 3D — first-person open-world crime, rendered in hand-written WebGL. -->
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vice Blocks 3D</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -12,10 +11,8 @@
 <div id="vignette"></div>
 <div id="speedfx"></div>
 <section id="hud">
-  <div class="bar-wrap">
-    <div class="bar"><div id="health"></div></div>
-    <div class="bar"><div id="armor"></div></div>
-  </div>
+  <div class="bar-wrap"><div class="bar"><div id="health"></div></div></div>
+  <div class="bar-wrap armor-wrap"><div class="bar"><div id="armor"></div></div></div>
   <div id="mission"></div>
   <div id="dispatch"></div>
   <div id="slots"></div>
@@ -23,22 +20,25 @@
   <div id="cash">$0000000</div>
   <div id="stars">☆☆☆☆☆</div>
   <div id="respectWrap"><div id="respectfill"></div></div>
-  <div id="rank">RESPECT · RUNNER</div>
+  <div id="rank"></div>
   <div id="banner"></div>
   <div id="msg"></div>
   <div id="timer"></div>
-  <div id="bustlabel"></div>
+  <div id="bustlabel">BUSTED</div>
   <div id="bustbar"><div id="bustfill"></div></div>
   <div id="prompt"></div>
   <div id="crosshair">+</div>
   <canvas id="minimap" width="168" height="168"></canvas>
   <div id="speed"></div>
-  <div id="weapon">UNARMED</div>
+  <div id="weapon"></div>
 </section>
-<div id="help">WASD drive / move · Mouse look (click to lock)<br>Space handbrake — drift! · Shift run on foot<br>F steal / enter car · T taxi job · R reload<br>Right mouse aim · Left mouse shoot · E interact · P / Esc pause</div>
+<div id="help">
+  WASD drive / walk · Mouse look · F enter car · E interact · T taxi job ·
+  R radio / reload · 1–4 weapons · Space handbrake · Shift run · P pause
+</div>
 <div id="overlay">
-  <div id="ovTitle">VICE BLOCKS 3D</div>
-  <div id="ovSub">PRESS ANY KEY TO HIT THE STREETS</div>
+  <div id="ovTitle"></div>
+  <div id="ovSub"></div>
   <div id="ovFeat"></div>
   <div id="ovSave"></div>
 </div>

@@ -1,173 +1,126 @@
-// state.js — assembles the entire game state, then advances it one
-// tick at a time in a fixed order: player, reload bookkeeping, the
-// fire/explosion chain, traffic, pedestrians, population density, the
-// wanted system, missions. It is pure logic — no DOM, no WebGL — so the
-// identical code runs headless under Node for smoke tests.
-import { makeRng, clamp, dist2 } from '../rng.js';
-import { genCity, BLOCK } from './world.js';
-import { spawnTraffic, spawnParked, stepTrafficCar, placeCarNear, damageCar } from './traffic.js';
-import { spawnPed, stepPed, placePedNear } from './pedestrians.js';
-import * as wantedModule from './wanted.js';
-import * as playerModule from './player.js';
-import { stepMissions, startMission } from './missions.js';
+// state.js — the whole game in one object, plus the step function
+// that advances it. createState builds the city, the player, traffic
+// and pedestrians, and applies any saved profile. step() runs the
+// subsystems in a fixed order and keeps the shared timers (messages,
+// banner, trauma) ticking. Events are queued on state.events and
+// drained by main, which turns them into sound and particles.
 
-const TRAFFIC_COUNT = 16;
-const PARKED_COUNT = 10;
-const PED_COUNT = 30;
+import { createRng } from '../rng.js';
+import { createCity } from './world.js';
+import { spawnTraffic, stepTraffic, makeCar } from './traffic.js';
+import { spawnPeds, stepPeds } from './pedestrians.js';
+import { stepWanted, damageCar } from './wanted.js';
+import { stepMissions } from './missions.js';
+import { stepPlayer, hurtPlayer } from './player.js';
 
-export function createState(seed, saved) {
-  const rng = makeRng(seed);
-  const s = {
-    rng, seed, time: 0, mode: 'title', city: genCity(seed),
-    player: { x: -BLOCK * 0.5 + 9, z: BLOCK * 1.5, ry: 0, inCar: null, aim: false, speed: 0, bobPhase: 0 },
-    cars: [], cops: [], peds: [], pickups: [], targets: [], events: [],
-    stats: { stolen: 0, earned: 0 },
-    health: 100, armor: 0, cash: 80,
-    hasGun: false, ammo: 12, reserve: 240, reloadT: 0,
-    hasSmg: false, weapon: 'pistol', ammoSmg: 0, fireCd: 0,
-    hasShotgun: false, ammoShotgun: 0, hasRifle: false, ammoRifle: 0, flashT: 0,
-    respect: 0, radio: 0, armorUp: false, engineUp: false, heli: null,
-    wanted: 0, crimeHeat: 0, bustTimer: 0, pendingStars: null, dispatchT: 0, wantedDecay: 0,
-    missionIdx: 0, mission: null, taxi: null, boss: null,
-    banner: '', bannerT: 0, bannerColor: '', msg: '', msgT: 0,
-    fine: 0, camYaw: 0, trauma: 0, recoil: 0, roadJolt: 0,
-    gunfireT: 0, gunfireX: 0, gunfireZ: 0, shotMode: '',
+export function createState(seed, profile) {
+  const city = createCity(createRng(seed));
+  const state = {
+    seed,
+    rng: createRng(seed * 101 + 3),
+    city,
+    time: 0,
+    mode: 'title',
+    shotMode: '',
+    player: {
+      x: 9, z: 9, ry: 0, hp: 100, armor: 0,
+      inCar: null, walkPhase: 0, aim: false, moving: false,
+    },
+    cars: [], cops: [], peds: [], pickups: [], targets: [],
+    heli: null, spotTarget: null, boss: null, missionCar: null,
+    cash: 0, respect: 0,
+    heat: 0, stars: 0, lastSeenT: -99, lastCrimeT: -99,
+    spawnT: 0, roadblockCd: 0,
+    hasGun: false, hasSmg: false, hasShotgun: false, hasRifle: false,
+    weapon: 'pistol',
+    ammo: {
+      pistol: { mag: 12, res: 60 },
+      smg: { mag: 30, res: 120 },
+      shotgun: { mag: 6, res: 30 },
+      rifle: { mag: 30, res: 120 },
+    },
+    armorUp: false, engineUp: false,
+    fireCd: 0, reloadT: 0, flashT: 0, recoil: 0,
+    missionIdx: 0, mission: null, taxi: null,
+    radio: 1, msg: '', msgT: 0, banner: '', bannerT: 0,
+    trauma: 0, roadJolt: 0, bust: 0,
+    camYaw: 0, alarmX: 0, alarmZ: 0, alarmT: -99,
+    events: [],
   };
-  // These two facades break what would otherwise be import cycles
-  // between the logic modules.
-  s.wantedAPI = { add: wantedModule.addWanted };
-  s.playerAPI = { hurt: playerModule.hurt };
-  s.cars = spawnTraffic(rng, TRAFFIC_COUNT).concat(spawnParked(rng, PARKED_COUNT));
-  for (const car of s.cars) {
-    const looksTaxi = car.color[0] > 0.9 && car.color[1] > 0.7 && car.color[2] < 0.3;
-    if (looksTaxi) car.style = 'taxi';
-    else if (rng.chance(0.24)) car.style = 'sport';
+  if (profile) {
+    state.cash = profile.cash || 0;
+    state.respect = profile.respect || 0;
+    state.missionIdx = profile.missionIdx || 0;
+    state.hasGun = !!(profile.weapons && profile.weapons.pistol);
+    state.hasSmg = !!(profile.weapons && profile.weapons.smg);
+    state.hasShotgun = !!(profile.weapons && profile.weapons.shotgun);
+    state.hasRifle = !!(profile.weapons && profile.weapons.rifle);
+    if (state.hasRifle) state.weapon = 'rifle';
+    else if (state.hasShotgun) state.weapon = 'shotgun';
+    else if (state.hasSmg) state.weapon = 'smg';
+    state.armorUp = !!profile.armorUp;
+    state.engineUp = !!profile.engineUp;
   }
-  const leadParked = s.cars.find((c) => c.kind === 'parked');
-  if (leadParked) leadParked.style = 'sport';
-  for (let i = 0; i < PED_COUNT; i++) s.peds.push(spawnPed(s, rng));
-  if (saved) applySave(s, saved);
-  return s;
+  spawnTraffic(state, 20);
+  spawnPeds(state, 26);
+  // The beach coupe that mission one is about, parked on the shore road.
+  const coupe = makeCar(createRng(seed * 7 + 1), 'sport');
+  coupe.color = [0.95, 0.35, 0.55];
+  coupe.x = 135.1; coupe.z = -30; coupe.ry = 0;
+  coupe.parked = true;
+  state.cars.push(coupe);
+  state.missionCar = coupe;
+  return state;
 }
 
-function applySave(s, saved) {
-  if (typeof saved.cash === 'number') s.cash = saved.cash;
-  if (typeof saved.missionIdx === 'number') s.missionIdx = clamp(saved.missionIdx, 0, 8);
-  s.hasGun = !!saved.hasGun;
-  s.hasSmg = !!saved.hasSmg; if (s.hasSmg) s.ammoSmg = 30;
-  s.hasShotgun = !!saved.hasShotgun; if (s.hasShotgun) s.ammoShotgun = 6;
-  s.hasRifle = !!saved.hasRifle; if (s.hasRifle) s.ammoRifle = 25;
-  if (saved.weapon && playerModule.ownsWeapon(s, saved.weapon)) s.weapon = saved.weapon;
-  s.respect = saved.respect || 0;
-  s.armorUp = !!saved.armorUp; s.engineUp = !!saved.engineUp;
-  if (typeof saved.armor === 'number') s.armor = saved.armor;
+export function drainEvents(state) {
+  const out = state.events;
+  state.events = [];
+  return out;
 }
 
-export function drainEvents(s) { const out = s.events; s.events = []; return out; }
+export function step(state, input, dt) {
+  if (state.mode === 'paused') return;
+  state.time += dt;
+  state.msgT = Math.max(0, state.msgT - dt);
+  state.bannerT = Math.max(0, state.bannerT - dt);
+  state.trauma = Math.max(0, state.trauma - dt * 0.55);
 
-// The burn chain: a wreck at zero health catches fire, burns for a few
-// seconds, then detonates — damaging nearby cars (which may catch and
-// blow in turn), scattering pedestrians and shaking the player.
-export function processBurning(s, dt) {
-  const fleet = s.cars.concat(s.cops);
-  for (const car of fleet) {
-    if (car.kind === 'dead') continue;
-    if (car.hp <= 0 && car.burning == null) {
-      car.burning = car === s.player.inCar ? 3 : 2 + s.rng() * 2;
-      s.events.push({ name: 'carFire', data: car });
-    }
-    if (car.burning == null || car.burning <= 0) continue;
-    car.burning -= dt;
-    if (car.burning > 0) continue;
-    car.burning = 0; car.kind = 'dead'; car.speed = 0; car.smoke = 2;
-    s.events.push({ name: 'explode', data: { x: car.x, z: car.z } });
-    for (const other of fleet) {
-      if (other !== car && other.kind !== 'dead' && dist2(other.x, other.z, car.x, car.z) < 9 * 9) damageCar(s, other, 45);
-    }
-    for (const ped of s.peds) {
-      if (ped.state !== 'dead' && dist2(ped.x, ped.z, car.x, car.z) < 8 * 8) { ped.state = 'flee'; ped.t = 3; }
-    }
-    const gapToPlayer = Math.hypot(s.player.x - car.x, s.player.z - car.z);
-    if (gapToPlayer < 10) {
-      s.trauma = Math.min(1, (s.trauma || 0) + (1 - gapToPlayer / 10) * 0.8);
-      if (s.player.inCar) damageCar(s, s.player.inCar, 30);
-      else if (gapToPlayer < 7) s.playerAPI.hurt(s, 30);
-    }
-    if (car === s.player.inCar) { s.player.inCar = null; s.playerAPI.hurt(s, 55); }
+  if (state.mode === 'title') {
+    stepTraffic(state, dt);
+    stepPeds(state, dt);
+    return;
   }
-}
+  if (state.mode !== 'play') return;
 
-// Keep the player's neighbourhood populated: at least five pedestrians
-// and four traffic cars within 60 m, recycled in from across the city.
-export function manageDensity(s) {
-  const p = s.player;
-  let nearPeds = 0; const farPeds = [];
-  for (const ped of s.peds) {
-    const d = dist2(ped.x, ped.z, p.x, p.z);
-    if (d < 60 * 60) nearPeds++;
-    else if (d > 95 * 95 && ped.state === 'walk') farPeds.push(ped);
-  }
-  for (let i = 0; nearPeds < 5 && i < farPeds.length; i++, nearPeds++) placePedNear(s, farPeds[i], s.rng);
-  let nearCars = 0; const farCars = [];
-  for (const car of s.cars) {
-    if (car.kind !== 'traffic') continue;
-    const d = dist2(car.x, car.z, p.x, p.z);
-    if (d < 60 * 60) nearCars++;
-    else if (d > 100 * 100) farCars.push(car);
-  }
-  for (let i = 0; nearCars < 4 && i < farCars.length; i++, nearCars++) placeCarNear(s, farCars[i], s.rng);
-}
+  stepPlayer(state, input, dt);
+  stepTraffic(state, dt);
+  stepPeds(state, dt);
+  stepWanted(state, dt);
+  stepMissions(state, dt);
 
-function decayTimers(s, dt) {
-  if (s.bannerT > 0) s.bannerT -= dt;
-  if (s.msgT > 0) s.msgT -= dt;
-  if (s.gunfireT > 0) s.gunfireT -= dt;
-  s.trauma = Math.max(0, (s.trauma || 0) - dt * 1.4);
-  s.recoil = Math.max(0, (s.recoil || 0) - dt / 0.12);
-  s.fireCd = Math.max(0, (s.fireCd || 0) - dt);
-  s.flashT = Math.max(0, (s.flashT || 0) - dt);
-}
-
-export function step(s, input, dt) {
-  s.time += dt;
-  decayTimers(s, dt);
-  if (s.mode !== 'play') return;
-  if (!s.mission && !s.taxi && s.missionIdx === 0 && !s._metContact) {
-    const zone = s.city.zones.contact;
-    if (dist2(s.player.x, s.player.z, zone.x, zone.z) < zone.r * zone.r) { s._metContact = true; startMission(s); }
-  }
-  const p = s.player;
-  if (p.inCar) playerModule.stepPlayerCar(s, input, dt);
-  else playerModule.stepPlayerFoot(s, input, dt);
-  playerModule.stepZonesCar(s, dt);
-  const def = playerModule.WEAPONS[playerModule.activeWeapon(s)];
-  if (s.reloadT > 0) {
-    s.reloadT -= dt;
-    if (s.reloadT <= 0 && s.reserve > 0) {
-      const moved = Math.min(def.size - s[def.mag], s.reserve);
-      s[def.mag] += moved; s.reserve -= moved;
+  // Burning wrecks cook off; the blast chains into whatever is close.
+  const everyone = state.cars.concat(state.cops);
+  for (const car of everyone) {
+    if (car.burning > 0 && !car.exploded) {
+      car.burning -= dt;
+      if (car.burning <= 0) damageCar(state, car, 1000);
     }
   }
-  if (input.reload && s.hasGun && s[def.mag] < def.size && s.reserve > 0 && s.reloadT <= 0) s.reloadT = 0.9;
-  processBurning(s, dt);
-  for (const car of s.cars) if (car !== p.inCar && car.kind === 'traffic') stepTrafficCar(s, car, dt);
-  for (const ped of s.peds) stepPed(s, ped, dt);
-  s.peds = s.peds.filter((ped) => ped.state !== 'dead' || ped.t > -6);
-  while (s.peds.length < 28) s.peds.push(spawnPed(s, s.rng));
-  s.densityT = (s.densityT || 0) - dt;
-  if (s.densityT <= 0) { s.densityT = 0.6; manageDensity(s); }
-  const starsBefore = s.wanted;
-  wantedModule.stepWanted(s, dt);
-  if (starsBefore >= 2 && s.wanted === 0 && s.mode === 'play') {
-    s.respect += 40;
-    s.events.push({ name: 'respect', data: s.respect });
-    s.msg = 'CLEAN GETAWAY — RESPECT +40'; s.msgT = 2;
-  }
-  stepMissions(s, dt);
-  for (const car of s.cars) {
-    if (car.kind === 'traffic' && dist2(car.x, car.z, p.x, p.z) > 300 * 300) {
-      car.x = p.x + s.rng.range(-120, 120);
-      car.z = p.z + s.rng.range(-120, 120);
+  for (const ev of state.events) {
+    if (ev.name !== 'explode' || ev.chained) continue;
+    ev.chained = true;
+    const src = ev.data;
+    if (!src || src.x == null) continue;
+    for (const car of everyone) {
+      if (car !== src && !car.exploded) {
+        const d2 = (car.x - src.x) ** 2 + (car.z - src.z) ** 2;
+        if (d2 < 7.5 * 7.5) damageCar(state, car, 42);
+      }
     }
+    const p = state.player;
+    const pd2 = (p.x - src.x) ** 2 + (p.z - src.z) ** 2;
+    if (pd2 < 7 * 7) hurtPlayer(state, 26);
+    state.trauma = Math.min(1, state.trauma + 0.4);
   }
 }

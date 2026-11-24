@@ -1,155 +1,121 @@
-// world.js — the city as data rather than pixels. A zoned 5x5 grid of
-// blocks sits against the coast: tall towers downtown in the middle, a
-// low row along the eastern beach, mid-rise blocks everywhere else. This
-// module also names the districts, lays out five service zones, and
-// answers building-collision queries through a 40 m spatial hash.
-import { makeRng } from '../rng.js';
+// world.js — procedural city generation. A square grid of avenues
+// spaced PITCH apart; the blocks between them hold pastel Art Deco
+// towers, and the east edge gives way to sand and water. Everything is
+// placed from the seeded stream so a seed always builds the same city.
 
-export const BLOCK = 46;
-export const ROAD = 15;
-export const GRID = 5;
-export const CITY_HALF = (GRID * BLOCK) / 2 + BLOCK;
+export const ROAD = 13;
+export const BLOCK = 33;
+export const PITCH = ROAD + BLOCK;
+export const CITY_HALF = PITCH * 3 + PITCH / 2;
 
 export function roadCenters() {
-  const lines = [];
-  for (let i = 0; i <= GRID; i++) lines.push(-GRID * BLOCK / 2 + i * BLOCK);
-  return lines;
+  const out = [];
+  for (let k = -3; k <= 3; k++) out.push(k * PITCH);
+  return out;
 }
 
-export function isOnRoad(x, z) {
-  for (const c of roadCenters()) {
-    if (Math.abs(x - c) < ROAD / 2 + 1) return true;
-    if (Math.abs(z - c) < ROAD / 2 + 1) return true;
-  }
-  return false;
-}
+const PROP_KINDS = ['bin', 'barrier', 'hydrant', 'crate'];
+const CRATE_COLORS = [[0.72, 0.55, 0.32], [0.4, 0.55, 0.62], [0.68, 0.42, 0.38], [0.5, 0.6, 0.42]];
+const SIGN_COLORS = [[1, 0.45, 0.6], [0.4, 0.9, 1], [1, 0.75, 0.3], [0.55, 1, 0.6], [1, 0.55, 0.3]];
 
-// District lookup: the harbour circle wins first, then the outer
-// quadrants, and downtown keeps whatever remains in the middle.
-export function districtAt(city, x, z) {
-  const port = city.zones.harbor;
-  const dx = x - port.x, dz = z - port.z;
-  if (dx * dx + dz * dz < 34 * 34) return 'THE HARBOR';
-  if (x > 55) return 'OCEAN DRIVE';
-  if (z < -55) return 'SOLMAR BAY';
-  if (x < -55) return 'PALM HEIGHTS';
-  if (z > 55) return 'NORTH BEACH';
-  return 'DOWNTOWN';
-}
+export function createCity(rng) {
+  const centers = roadCenters();
+  const buildings = [];
+  const palms = [];
+  const lights = [];
+  const props = [];
+  const signs = [];
 
-const BUILDING_PALETTE = [
-  [0.96, 0.55, 0.75], [0.45, 0.85, 0.95], [0.98, 0.80, 0.45], [0.70, 0.60, 0.95],
-  [0.55, 0.95, 0.70], [0.95, 0.65, 0.50], [0.85, 0.90, 0.98], [0.60, 0.75, 0.90],
-];
-const SIGN_PALETTE = [
-  [0.98, 0.62, 0.50], [0.85, 0.93, 0.98], [0.98, 0.85, 0.60], [0.75, 0.90, 0.80], [0.96, 0.75, 0.82],
-];
-const PROP_KINDS = ['bin', 'bin', 'barrier', 'hydrant', 'crate'];
-
-function makeZones() {
-  return {
-    gunshop: { x: -BLOCK * 1.5, z: -BLOCK * 0.5, r: 7, label: 'AMMU-NATION', color: [1, 0.3, 0.25] },
-    hospital: { x: BLOCK * 1.5, z: BLOCK * 0.5, r: 8, label: 'HOSPITAL', color: [1, 1, 1] },
-    spray: { x: BLOCK * 0.5, z: -BLOCK * 1.5, r: 7, label: "PAY 'N SPRAY", color: [0.3, 1, 0.6] },
-    contact: { x: -BLOCK * 0.5, z: BLOCK * 1.5, r: 6, label: 'CONTACT', color: [1, 0.3, 0.7] },
-    harbor: { x: BLOCK * 2.0, z: BLOCK * 1.5, r: 7, label: 'HARBOR', color: [0.4, 0.8, 1] },
-  };
-}
-
-// Roughly one building in five earns a pastel sign panel on a random face.
-function attachSign(rng, b, signs) {
-  if (!rng.chance(0.2)) return;
-  const panel = { x: b.x, z: b.z, y: 0, w: rng.range(4, 8), h: rng.range(1.2, 2.2), color: SIGN_PALETTE[rng.int(0, SIGN_PALETTE.length - 1)], ry: 0 };
-  panel.y = rng.range(3, Math.min(b.h - 2, 12));
-  const face = rng.int(0, 3);
-  if (face === 0) { panel.z = b.z - b.d / 2 - 0.15; panel.ry = Math.PI; }
-  else if (face === 1) { panel.z = b.z + b.d / 2 + 0.15; panel.ry = 0; }
-  else if (face === 2) { panel.x = b.x - b.w / 2 - 0.15; panel.ry = -Math.PI / 2; }
-  else { panel.x = b.x + b.w / 2 + 0.15; panel.ry = Math.PI / 2; }
-  signs.push(panel);
-}
-
-export function genCity(seed) {
-  const rng = makeRng(seed);
-  const buildings = [], palms = [], lights = [], signs = [], props = [];
-  const lot = BLOCK - ROAD;
-  for (let gx = 0; gx < GRID; gx++) for (let gz = 0; gz < GRID; gz++) {
-    const centreX = -GRID * BLOCK / 2 + gx * BLOCK + BLOCK / 2;
-    const centreZ = -GRID * BLOCK / 2 + gz * BLOCK + BLOCK / 2;
-    const downtown = (gx === 2 && gz >= 1 && gz <= 3) || (gx === 1 && gz === 2) || (gx === 3 && gz === 2);
-    const beachfront = gx === GRID - 1;
-    const pair = rng.chance(0.45);
-    const placements = pair ? [[-lot / 4, -lot / 4], [lot / 4, lot / 4]] : [[0, 0]];
-    for (const off of placements) {
-      const lo = lot * (pair ? 0.34 : 0.55), hi = lot * (pair ? 0.44 : 0.8);
-      const b = {
-        x: centreX + off[0], z: centreZ + off[1],
-        w: rng.range(lo, hi), d: rng.range(lo, hi),
-        h: downtown ? rng.range(70, 110) : beachfront ? rng.range(12, 30) : rng.range(20, 60),
-        color: BUILDING_PALETTE[rng.int(0, BUILDING_PALETTE.length - 1)], tex: rng.int(0, 3), seed: rng.int(0, 9999),
+  // Towers: one or two per block cell, inset from the road edges so
+  // the avenues stay clear. Heights swell toward the middle of town.
+  for (let i = 0; i < centers.length - 1; i++) {
+    for (let j = 0; j < centers.length - 1; j++) {
+      const cx = centers[i] + PITCH / 2;
+      const cz = centers[j] + PITCH / 2;
+      if (rng.chance(0.10)) continue; // the odd empty lot
+      const centrality = 1 - Math.min(1, Math.hypot(cx, cz) / (CITY_HALF * 1.15));
+      const mkTower = (ox, oz, maxW) => {
+        const w = rng.range(15, maxW);
+        const d = rng.range(15, maxW);
+        const h = rng.range(9, 20) + centrality * rng.range(8, 30);
+        buildings.push({ x: cx + ox, z: cz + oz, w, d, h, tex: rng.int(0, 3) });
       };
-      buildings.push(b); attachSign(rng, b, signs);
-    }
-    const cornerDist = lot / 2 + 2.2;
-    for (const corner of [[-cornerDist, -cornerDist], [cornerDist, -cornerDist], [-cornerDist, cornerDist], [cornerDist, cornerDist]]) {
-      if (rng.chance(0.78)) palms.push({ x: centreX + corner[0], z: centreZ + corner[1], s: rng.range(0.85, 1.45), lean: rng.range(-0.12, 0.12) });
-      else if (rng.chance(0.6)) lights.push({ x: centreX + corner[0], z: centreZ + corner[1] });
-    }
-  }
-  for (let z = -CITY_HALF + 4; z < CITY_HALF - 2; z += 11) {
-    palms.push({ x: CITY_HALF - 3.5, z: z + rng.range(-1.5, 1.5), s: rng.range(1.0, 1.5), lean: rng.range(-0.1, 0.16) });
-    if (rng.chance(0.6)) palms.push({ x: CITY_HALF - 9, z: z + 5 + rng.range(-1, 1), s: rng.range(0.9, 1.3), lean: rng.range(-0.14, 0.1) });
-  }
-  const lines = roadCenters();
-  for (let i = 0; i < 90; i++) {
-    const roadLine = lines[rng.int(0, lines.length - 1)];
-    const horizontal = rng.chance(0.5);
-    const along = rng.range(-CITY_HALF + 6, CITY_HALF - 6);
-    const sideOff = (rng.chance(0.5) ? 1 : -1) * rng.range(8.8, 10.8);
-    props.push({ x: horizontal ? along : roadLine + sideOff, z: horizontal ? roadLine + sideOff : along, kind: rng.pick(PROP_KINDS), ry: rng.range(0, Math.PI), color: BUILDING_PALETTE[rng.int(0, BUILDING_PALETTE.length - 1)] });
-  }
-  // Register every building in its own 40 m cell and all eight
-  // neighbours, so a radius query near a cell border can never miss a
-  // collider.
-  const hash = new Map();
-  const keyOf = (cx, cz) => cx + ',' + cz;
-  for (const b of buildings) {
-    const cellX = Math.floor(b.x / 40), cellZ = Math.floor(b.z / 40);
-    for (let ix = cellX - 1; ix <= cellX + 1; ix++) for (let iz = cellZ - 1; iz <= cellZ + 1; iz++) {
-      const k = keyOf(ix, iz);
-      if (!hash.has(k)) hash.set(k, []);
-      hash.get(k).push(b);
+      if (rng.chance(0.35)) {
+        mkTower(-8, -8, 13);
+        mkTower(8, 8, 13);
+      } else {
+        mkTower(0, 0, 27);
+      }
+      // A neon sign on a random face of some towers.
+      if (rng.chance(0.30)) {
+        const b = buildings[buildings.length - 1];
+        signs.push({
+          x: b.x, y: b.h * rng.range(0.45, 0.7), z: b.z + b.d / 2 + 0.2,
+          ry: 0, w: rng.range(3, 6), h: rng.range(1.2, 2.2),
+          color: SIGN_COLORS[rng.int(0, SIGN_COLORS.length - 1)],
+        });
+      }
     }
   }
-  const city = { buildings, palms, lights, signs, props, zones: makeZones(), seed, hash };
-  city.getCollidersInRadius = function (x, z, r) {
-    const collected = new Set();
-    const cellX = Math.floor(x / 40), cellZ = Math.floor(z / 40);
-    const span = Math.ceil(r / 40) + 1;
-    for (let ix = cellX - span; ix <= cellX + span; ix++) for (let iz = cellZ - span; iz <= cellZ + span; iz++) {
-      const cell = hash.get(keyOf(ix, iz));
-      if (cell) for (const b of cell) collected.add(b);
+
+  // Palms: a row down the beach and clusters at avenue corners,
+  // always kept off the carriageway itself.
+  for (let z = -CITY_HALF; z <= CITY_HALF; z += rng.range(9, 15)) {
+    palms.push({ x: CITY_HALF + rng.range(10, 22), z, s: rng.range(0.85, 1.25), lean: rng.range(0.05, 0.22) });
+  }
+  for (const cx of centers) {
+    for (const cz of centers) {
+      if (rng.chance(0.55)) {
+        palms.push({
+          x: cx + (ROAD / 2 + 1.7) * (rng.chance(0.5) ? 1 : -1),
+          z: cz + (ROAD / 2 + 1.7) * (rng.chance(0.5) ? 1 : -1),
+          s: rng.range(0.8, 1.15), lean: rng.range(0.05, 0.18),
+        });
+      }
     }
-    return Array.from(collected);
+  }
+
+  // Streetlights staggered along both kerbs of every avenue.
+  for (const c of centers) {
+    for (let t = -CITY_HALF + 12; t < CITY_HALF; t += 23) {
+      lights.push({ x: c - ROAD / 2 - 0.9, z: t });
+      lights.push({ x: t + 11, z: c + ROAD / 2 + 0.9 });
+    }
+  }
+
+  // Street props scattered on the sidewalks.
+  for (let n = 0; n < 130; n++) {
+    const onVertical = rng.chance(0.5);
+    const road = centers[rng.int(0, centers.length - 1)];
+    const side = rng.chance(0.5) ? 1 : -1;
+    const along = rng.range(-CITY_HALF, CITY_HALF);
+    const kind = PROP_KINDS[rng.int(0, PROP_KINDS.length - 1)];
+    const px = onVertical ? road + side * (ROAD / 2 + 1.1) : along;
+    const pz = onVertical ? along : road + side * (ROAD / 2 + 1.1);
+    props.push({ x: px, z: pz, kind, color: CRATE_COLORS[rng.int(0, CRATE_COLORS.length - 1)] });
+  }
+
+  const zones = {
+    gunshop: { x: 56, z: -56, color: [1, 0.62, 0.2], label: 'AMMU-NATION' },
+    hospital: { x: -56, z: 56, color: [0.95, 0.95, 0.98], label: 'HOSPITAL' },
+    spray: { x: 56, z: 56, color: [0.35, 0.95, 0.55], label: "PAY 'N SPRAY" },
+    contact: { x: -56, z: -56, color: [1, 0.85, 0.3], label: 'CONTACT' },
+    harbor: { x: -128, z: 128, color: [0.4, 0.75, 1], label: 'THE HARBOR' },
   };
-  return city;
+
+  return { buildings, palms, lights, props, signs, zones };
 }
 
-// Push a point of radius r out of any building AABB it overlaps, along
-// the axis of least penetration, then clamp to the playable bounds.
-export function collideBuildings(city, x, z, r) {
-  let px = x, pz = z;
-  const nearby = city.getCollidersInRadius ? city.getCollidersInRadius(x, z, r + 26) : city.buildings;
-  for (const b of nearby) {
-    const halfW = b.w / 2 + r, halfD = b.d / 2 + r;
-    const dx = px - b.x, dz = pz - b.z;
-    if (Math.abs(dx) >= halfW || Math.abs(dz) >= halfD) continue;
-    const penX = halfW - Math.abs(dx), penZ = halfD - Math.abs(dz);
-    if (penX < penZ) px = b.x + (dx >= 0 ? halfW : -halfW);
-    else pz = b.z + (dz >= 0 ? halfD : -halfD);
+// Six named districts, sliced by avenue bands.
+export function districtAt(x, z) {
+  if (x > 55) {
+    if (z < -20) return 'NORTH BEACH';
+    if (z > 20) return 'SOLMAR BAY';
+    return 'OCEAN DRIVE';
   }
-  const bound = CITY_HALF + 30;
-  if (px < -bound) px = -bound; if (px > bound) px = bound;
-  if (pz < -bound) pz = -bound; if (pz > bound) pz = bound;
-  return [px, pz];
+  if (x < -55) {
+    if (z < 0) return 'PALM HEIGHTS';
+    return 'THE HARBOR';
+  }
+  return 'DOWNTOWN';
 }

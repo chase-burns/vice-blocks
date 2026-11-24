@@ -1,148 +1,171 @@
-// textures.js — the game ships no image assets whatsoever. Every
-// texture is painted onto a 2D canvas at startup: four pastel Deco
-// facades, a fifth dusk facade packed with lit windows for the chase
-// scene, asphalt, sidewalk pavers, a radial spotlight pool, a soft round
-// particle sprite, and the face of the cockpit gauge cluster.
+// textures.js — every texture in the game is painted procedurally on
+// 2D canvases at boot: five Art Deco facade variants, asphalt, sidewalk
+// concrete, a radial spotlight pool, and the cockpit gauge cluster
+// (which is repainted live as speed and revs change). No image files,
+// no downloads.
 
-function pushTexture(gl, canvas, repeat) {
+function makeCanvas(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return [c, c.getContext('2d')];
+}
+
+function upload(gl, canvas) {
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  const wrap = repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE;
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
   return tex;
 }
 
-function freshCanvas(w, h) {
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  return c;
-}
-
-// A tiny deterministic LCG so the facade window patterns come out the
-// same on every boot and screenshots stay reproducible.
-function lcgRandom(seed) {
-  let state = seed;
-  return () => { state = (state * 16807) % 2147483647; return state / 2147483647; };
-}
-
-const WARM_LIT = ['#ffd98a', '#ffb36b', '#ffe9bb'];
-const COOL_LIT = ['#cfe9ff', '#9fd8ff'];
-
-// Paint one facade: a flat pastel wall, then a grid of windows where
-// each cell rolls warm-lit, cool-lit or dark per the given odds.
-function facadeCanvas(wallColor, seed, warmP, coolP, darkColor) {
-  const c = freshCanvas(128, 256);
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = wallColor; ctx.fillRect(0, 0, 128, 256);
-  const rnd = lcgRandom(seed);
-  for (let y = 10; y < 246; y += 21) for (let x = 10; x < 118; x += 21) {
-    const roll = rnd();
-    if (roll < warmP) ctx.fillStyle = WARM_LIT[Math.floor(rnd() * WARM_LIT.length)];
-    else if (roll < warmP + coolP) ctx.fillStyle = COOL_LIT[Math.floor(rnd() * COOL_LIT.length)];
-    else ctx.fillStyle = darkColor;
-    ctx.fillRect(x, y, 11, 12);
+// One facade variant: a pastel wall, a darker plinth band, deco fins
+// between window columns, and a grid of windows — many of them lit
+// warm when the variant is the dusk one.
+function paintFacade(ctx, w, h, palette, litRatio) {
+  ctx.fillStyle = palette.wall;
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = palette.plinth;
+  ctx.fillRect(0, h - 14, w, 14);
+  ctx.fillStyle = palette.band;
+  ctx.fillRect(0, 0, w, 6);
+  const cols = 6, rows = 10;
+  const cw = w / cols, ch = h / rows;
+  for (let cx = 0; cx < cols; cx++) {
+    ctx.fillStyle = palette.fin;
+    ctx.fillRect(cx * cw + cw - 3, 6, 3, h - 20);
+    for (let cy = 0; cy < rows; cy++) {
+      const lit = ((cx * 7 + cy * 13) % 10) / 10 < litRatio;
+      ctx.fillStyle = lit ? palette.lit : palette.glass;
+      ctx.fillRect(cx * cw + 4, cy * ch + 5, cw - 11, ch - 9);
+    }
   }
-  return c;
 }
 
-// The gauge-cluster face. It is painted pre-flipped vertically because
-// the upload path never sets FLIP_Y — painted the other way round, the
-// labels would end up mirrored.
-function clusterFace(ctx, needles) {
-  ctx.fillStyle = '#0a0a0e'; ctx.fillRect(0, 0, 256, 128);
-  ctx.save(); ctx.translate(0, 128); ctx.scale(1, -1);
-  const drawDial = (cx, label, frac) => {
-    ctx.strokeStyle = '#2a2f3a'; ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.arc(cx, 64, 46, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = '#ffb36b'; ctx.lineWidth = 2;
+const FACADES = [
+  { wall: '#e8b4a0', plinth: '#b98a76', band: '#f4d8c4', fin: '#c99a84', glass: '#3d4a58', lit: '#ffd9a0' },
+  { wall: '#f0d9a8', plinth: '#c2a878', band: '#f8ecc8', fin: '#d4ba8a', glass: '#42505e', lit: '#ffe2ae' },
+  { wall: '#a8ccd4', plinth: '#7ea6ae', band: '#cde8ec', fin: '#8fb8c0', glass: '#36434e', lit: '#ffd9a0' },
+  { wall: '#e4a8bc', plinth: '#ba8296', band: '#f6cede', fin: '#cc93a8', glass: '#3d4a58', lit: '#ffe0ae' },
+  { wall: '#a08eb2', plinth: '#7d6c90', band: '#bcaed0', fin: '#9181a5', glass: '#46586a', lit: '#ffc978' },
+];
+
+function paintRoad(ctx, w, h) {
+  ctx.fillStyle = '#4a4a52';
+  ctx.fillRect(0, 0, w, h);
+  for (let i = 0; i < 900; i++) {
+    const g = 60 + Math.floor(Math.random() * 40);
+    ctx.fillStyle = `rgb(${g},${g},${g + 8})`;
+    ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  ctx.fillRect(0, 0, w, 3);
+  ctx.fillRect(0, h - 3, w, 3);
+}
+
+function paintWalk(ctx, w, h) {
+  ctx.fillStyle = '#b8ab9c';
+  ctx.fillRect(0, 0, w, h);
+  for (let i = 0; i < 500; i++) {
+    const g = 150 + Math.floor(Math.random() * 50);
+    ctx.fillStyle = `rgb(${g},${g - 8},${g - 22})`;
+    ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
+  }
+  ctx.strokeStyle = 'rgba(90,80,70,0.55)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, w - 2, h - 2);
+}
+
+function paintPool(ctx, w, h) {
+  const grad = ctx.createRadialGradient(w / 2, h / 2, 4, w / 2, h / 2, w / 2);
+  grad.addColorStop(0, 'rgba(255,250,225,0.95)');
+  grad.addColorStop(0.55, 'rgba(255,244,200,0.45)');
+  grad.addColorStop(1, 'rgba(255,240,190,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+}
+
+export function createTextures(gl) {
+  const out = {};
+  FACADES.forEach((pal, i) => {
+    const [c, ctx] = makeCanvas(128, 256);
+    paintFacade(ctx, 128, 256, pal, i === 4 ? 0.5 : 0.14);
+    out['b' + i] = upload(gl, c);
+  });
+  {
+    const [c, ctx] = makeCanvas(128, 128);
+    paintRoad(ctx, 128, 128);
+    out.road = upload(gl, c);
+  }
+  {
+    const [c, ctx] = makeCanvas(128, 128);
+    paintWalk(ctx, 128, 128);
+    out.walk = upload(gl, c);
+  }
+  {
+    const [c, ctx] = makeCanvas(128, 128);
+    paintPool(ctx, 128, 128);
+    out.pool = upload(gl, c);
+  }
+  // The dash texture keeps its canvas so the gauges can be repainted.
+  const [dc, dctx] = makeCanvas(256, 128);
+  out.dash = { tex: upload(gl, dc), canvas: dc, ctx: dctx };
+  drawDashTexture(gl, out.dash, 0, 0.1);
+  return out;
+}
+
+// Repaint the gauge cluster face: a speed dial on the left (0–160 mph)
+// and a rev dial on the right (0–8k, fed a 0..1 fraction), orange
+// needles, red zone past 6.5k, and a small digital speed readout.
+export function drawDashTexture(gl, dash, mph, rpm) {
+  const ctx = dash.ctx, w = 256, h = 128;
+  ctx.fillStyle = '#0b0d12';
+  ctx.fillRect(0, 0, w, h);
+  const dial = (cx, cy, r, frac, maxLabel, redFrom) => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#14171f';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#3a4152';
+    ctx.stroke();
     for (let i = 0; i <= 10; i++) {
-      const a = Math.PI * 0.75 + (i * Math.PI * 1.5) / 10;
+      const a = Math.PI * 0.75 + (i / 10) * Math.PI * 1.5;
+      const inner = i / 10 >= redFrom ? r - 13 : r - 9;
       ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(a) * 38, 64 + Math.sin(a) * 38);
-      ctx.lineTo(cx + Math.cos(a) * 45, 64 + Math.sin(a) * 45);
+      ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
+      ctx.lineTo(cx + Math.cos(a) * (r - 3), cy + Math.sin(a) * (r - 3));
+      ctx.strokeStyle = i / 10 >= redFrom ? '#e0483c' : '#8b93a5';
+      ctx.lineWidth = i % 5 === 0 ? 3 : 1.5;
       ctx.stroke();
     }
-    if (frac != null) {
-      const na = Math.PI * 0.75 + Math.min(1, frac) * Math.PI * 1.5;
-      ctx.strokeStyle = '#ff7b3c'; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(cx, 64);
-      ctx.lineTo(cx + Math.cos(na) * 40, 64 + Math.sin(na) * 40); ctx.stroke();
-    }
-    ctx.fillStyle = '#ffe1b8'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(label, cx, 100);
+    const na = Math.PI * 0.75 + Math.max(0, Math.min(1, frac)) * Math.PI * 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(na) * (r - 8), cy + Math.sin(na) * (r - 8));
+    ctx.strokeStyle = '#ff8c3a';
+    ctx.lineWidth = 3.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#c8ccd6';
+    ctx.fill();
+    ctx.fillStyle = '#79808f';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(maxLabel, cx, cy + r - 8);
   };
-  drawDial(64, 'MPH', needles ? needles[0] : null);
-  drawDial(192, 'RPM', needles ? needles[1] : null);
-  ctx.restore();
-}
-
-export function makeTextures(gl) {
-  const texSet = {};
-  const facadeSpecs = [
-    { wall: '#f2ede2', seed: 1234 },
-    { wall: '#f6cf9f', seed: 555 + 777 },
-    { wall: '#bfe0cd', seed: 987 + 1554 },
-    { wall: '#f4c3d2', seed: 313 + 2331 },
-  ];
-  facadeSpecs.forEach((spec, i) => {
-    texSet['b' + i] = pushTexture(gl, facadeCanvas(spec.wall, spec.seed, 0.30, 0, '#46545e'), true);
-  });
-  texSet.b4 = pushTexture(gl, facadeCanvas('#8a94ac', 4242, 0.34, 0.14, '#232a36'), true);
-  {
-    const c = freshCanvas(128, 128), ctx = c.getContext('2d');
-    const grad = ctx.createRadialGradient(64, 64, 4, 64, 64, 64);
-    grad.addColorStop(0, '#fffbe8'); grad.addColorStop(0.45, '#c9bd96'); grad.addColorStop(1, '#000000');
-    ctx.fillStyle = grad; ctx.fillRect(0, 0, 128, 128);
-    texSet.pool = pushTexture(gl, c, false);
-  }
-  {
-    const c = freshCanvas(256, 256), ctx = c.getContext('2d');
-    ctx.fillStyle = '#5b5751'; ctx.fillRect(0, 0, 256, 256);
-    const rnd = lcgRandom(42);
-    for (let i = 0; i < 5200; i++) {
-      ctx.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.16)';
-      ctx.fillRect(rnd() * 256, rnd() * 256, 1.6, 1.6);
-    }
-    texSet.road = pushTexture(gl, c, true);
-  }
-  {
-    const c = freshCanvas(128, 128), ctx = c.getContext('2d');
-    ctx.fillStyle = '#cfc0a0'; ctx.fillRect(0, 0, 128, 128);
-    ctx.strokeStyle = '#b3a184'; ctx.lineWidth = 3;
-    for (let i = 0; i <= 128; i += 32) {
-      ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 128); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(128, i); ctx.stroke();
-    }
-    texSet.walk = pushTexture(gl, c, true);
-  }
-  {
-    const c = freshCanvas(256, 128);
-    clusterFace(c.getContext('2d'), null);
-    texSet.dash = pushTexture(gl, c, false);
-  }
-  {
-    const c = freshCanvas(64, 64), ctx = c.getContext('2d');
-    const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 31);
-    grad.addColorStop(0, 'rgba(255,255,255,0.9)');
-    grad.addColorStop(0.55, 'rgba(255,255,255,0.35)');
-    grad.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = grad; ctx.fillRect(0, 0, 64, 64);
-    texSet.particle = pushTexture(gl, c, false);
-  }
-  return texSet;
-}
-
-// Repaint the cluster with the live needle positions and re-upload it.
-// Runs a few times a second while driving; reuses a single scratch
-// canvas rather than allocating.
-export function drawDashTexture(gl, tex, mph, rpm) {
-  if (!drawDashTexture.scratch) drawDashTexture.scratch = freshCanvas(256, 128);
-  const c = drawDashTexture.scratch;
-  clusterFace(c.getContext('2d'), [mph / 120, rpm]);
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
+  dial(62, 66, 46, mph / 160, 'MPH', 2);
+  dial(186, 66, 46, rpm, 'RPM x1000', 0.81);
+  ctx.fillStyle = '#ffb35c';
+  ctx.font = 'bold 17px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(String(Math.round(mph)), 124, 62);
+  ctx.fillStyle = '#79808f';
+  ctx.font = '8px monospace';
+  ctx.fillText('MPH', 124, 74);
+  gl.bindTexture(gl.TEXTURE_2D, dash.tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, dash.canvas);
 }

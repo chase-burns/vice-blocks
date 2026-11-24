@@ -1,35 +1,49 @@
-// storage.js — persistence for the player profile under one
-// localStorage key. Saved fields: cash, story progress, owned weapons
-// and the equipped one, respect, and the two garage upgrades. If the
-// browser blocks storage (private mode, for instance), a module-level
-// in-memory copy still carries the profile for the rest of the session.
-const PROFILE_KEY = 'viceblocks-save';
-let sessionCopy = null;
+// storage.js — the persistent profile: cash, respect, story progress,
+// owned weapons and garage upgrades, kept in localStorage under one
+// key so a reload picks the run back up.
+
+const SAVE_KEY = 'viceblocks-save';
+
+export function defaultProfile() {
+  return {
+    cash: 0,
+    respect: 0,
+    missionIdx: 0,
+    weapons: { pistol: false, smg: false, shotgun: false, rifle: false },
+    armorUp: false,
+    engineUp: false,
+  };
+}
 
 export function loadProfile() {
   try {
-    const text = localStorage.getItem(PROFILE_KEY);
-    if (text) return JSON.parse(text);
-  } catch { /* storage unavailable — use the in-memory copy below */ }
-  return sessionCopy;
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return { ...defaultProfile(), ...parsed, weapons: { ...defaultProfile().weapons, ...(parsed.weapons || {}) } };
+  } catch {
+    return null;
+  }
 }
 
-export function saveProfile(s) {
-  const record = {
-    cash: s.cash,
-    missionIdx: s.missionIdx,
-    hasGun: s.hasGun,
-    armor: s.armor,
-    respect: s.respect,
-    hasSmg: s.hasSmg,
-    hasShotgun: s.hasShotgun,
-    hasRifle: s.hasRifle,
-    weapon: s.weapon,
-    armorUp: s.armorUp,
-    engineUp: s.engineUp,
-  };
-  sessionCopy = record;
+export function saveProfile(state) {
   try {
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(record));
-  } catch { /* sessionCopy already holds this save */ }
+    const data = {
+      cash: Math.round(state.cash),
+      respect: Math.round(state.respect),
+      missionIdx: state.missionIdx,
+      weapons: {
+        pistol: !!state.hasGun,
+        smg: !!state.hasSmg,
+        shotgun: !!state.hasShotgun,
+        rifle: !!state.hasRifle,
+      },
+      armorUp: !!state.armorUp,
+      engineUp: !!state.engineUp,
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch {
+    // Private mode / storage full: the run simply does not persist.
+  }
 }

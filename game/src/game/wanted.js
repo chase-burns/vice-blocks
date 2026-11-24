@@ -1,132 +1,162 @@
-// wanted.js — the law, and how it escalates. A crime only counts when
-// somebody witnessed it, and a witnessed raise sits through a 2.5 s
-// dispatch delay before the stars actually land. Each star level fields
-// a fixed number of pursuit units that steer at the player and ram on
-// contact. Four stars angles roadblocks across the road ahead; five
-// stars launches KESTREL-1, the helicopter with the spotlight. Linger
-// stationary next to a unit and the bust meter fills; break line of
-// sight for long enough and the stars bleed away.
-import { clamp, dist2, angleLerp } from '../rng.js';
-import { CITY_HALF, collideBuildings } from './world.js';
-import { damageCar } from './traffic.js';
+// wanted.js — heat, stars and the SBPD response. Crimes raise heat;
+// heat floors into stars. Patrols converge and ram, at four stars a
+// two-car roadblock is angled across the road ahead, and at five the
+// KESTREL-1 helicopter takes up station with its spotlight. Stay out
+// of sight and the heat bleeds away.
 
-export const COP_COUNTS = { 1: 1, 2: 2, 3: 4, 4: 5, 5: 7 };
-const DISPATCH_WAIT = 2.5;
+import { clamp, dist2, turnToward } from '../rng.js';
+import { roadCenters } from './world.js';
 
-export function witnessed(s, x, z) {
-  for (const ped of s.peds) if (dist2(ped.x, ped.z, x, z) < 35 * 35) return true;
-  for (const cop of s.cops) if (dist2(cop.x, cop.z, x, z) < 60 * 60) return true;
-  return s.wanted > 0;
+let copId = 5000;
+
+export function reportCrime(state, amount) {
+  const before = state.stars;
+  state.heat = clamp(state.heat + amount, 0, 5.9);
+  state.stars = clamp(Math.floor(state.heat), 0, 5);
+  state.lastCrimeT = state.time;
+  if (state.stars !== before) state.events.push({ name: 'wanted', data: state.stars });
 }
 
-export function addWanted(s, stars, wasWitnessed) {
-  if (!wasWitnessed) return;
-  if (stars <= s.wanted) { s.crimeHeat = Math.max(s.crimeHeat, 6 + s.wanted * 3); return; }
-  if (s.pendingStars == null || stars > s.pendingStars) { s.pendingStars = stars; s.dispatchT = DISPATCH_WAIT; }
-}
-
-function buildCopCar(s, x, z, ry, isBlocker) {
+function makeCopCar(state, x, z, ry) {
   return {
-    id: 900 + s.cops.length + Math.floor(s.rng() * 500), kind: 'cop',
-    x: clamp(x, -CITY_HALF, CITY_HALF), z: clamp(z, -CITY_HALF, CITY_HALF),
-    ry, speed: 0, targetSpeed: 17 + s.wanted,
-    hp: isBlocker ? 140 : 120, smoke: 0, driver: true, stopped: 0,
-    color: [0.95, 0.95, 0.97], roadblock: isBlocker,
+    id: copId++,
+    kind: 'cop', style: 'police',
+    color: [0.92, 0.92, 0.95],
+    x, z, ry,
+    speed: 0, steer: 0, phys: null,
+    gear: 3, rpm: 0.4, slip: 0, isDrifting: false,
+    hp: 100, smoke: 0, burning: 0, exploded: false,
+    roadblock: false, pit: false, _spin: 0, _dispA: 0, ramCd: 0,
   };
 }
 
-function deployPursuit(s) {
-  const angle = s.rng.range(0, Math.PI * 2);
-  s.cops.push(buildCopCar(s, s.player.x + Math.sin(angle) * 55, s.player.z + Math.cos(angle) * 55, 0, false));
-  s.events.push({ name: 'copSpawn' });
+function roadPointNear(state, x, z) {
+  const centers = roadCenters();
+  let bestX = centers[0], bestD = Infinity;
+  for (const c of centers) if (Math.abs(c - x) < bestD) { bestD = Math.abs(c - x); bestX = c; }
+  let bestZ = centers[0]; bestD = Infinity;
+  for (const c of centers) if (Math.abs(c - z) < bestD) { bestD = Math.abs(c - z); bestZ = c; }
+  return Math.abs(x - bestX) < Math.abs(z - bestZ) ? { x: bestX, z } : { x, z: bestZ };
 }
 
-// A pair of cruisers parked at an angle across the road, 70 m ahead.
-function deployRoadblock(s) {
-  const p = s.player;
-  const fx = Math.sin(p.ry), fz = Math.cos(p.ry), rx = Math.cos(p.ry), rz = -Math.sin(p.ry);
-  for (const side of [-2.2, 2.2]) {
-    const car = buildCopCar(s, p.x + fx * 70 + rx * side, p.z + fz * 70 + rz * side, p.ry + Math.PI / 2, true);
-    car.id = 990 + s.cops.length; car.targetSpeed = 20;
-    s.cops.push(car);
+function spawnPatrol(state) {
+  const p = state.player;
+  const ang = state.rng.range(0, Math.PI * 2);
+  const dist = state.rng.range(52, 68);
+  const spot = roadPointNear(state, p.x + Math.sin(ang) * dist, p.z + Math.cos(ang) * dist);
+  const cop = makeCopCar(state, spot.x, spot.z, Math.atan2(p.x - spot.x, p.z - spot.z));
+  cop.pit = state.stars >= 3 && state.rng.chance(0.4);
+  state.cops.push(cop);
+}
+
+function spawnRoadblock(state) {
+  const p = state.player;
+  const heading = p.inCar ? p.inCar.ry : p.ry;
+  const fx = Math.sin(heading), fz = Math.cos(heading);
+  const rx = Math.cos(heading), rz = -Math.sin(heading);
+  const ahead = 42;
+  for (const side of [-1, 1]) {
+    const x = p.x + fx * ahead + rx * side * 3.4;
+    const z = p.z + fz * ahead + rz * side * 3.4;
+    const cop = makeCopCar(state, x, z, heading - side * Math.PI / 4);
+    cop.roadblock = true;
+    state.cops.push(cop);
+  }
+  state.roadblockCd = 26;
+  state.events.push({ name: 'roadblock', data: 0 });
+}
+
+export function stepWanted(state, dt) {
+  const p = state.player;
+  const px = p.inCar ? p.inCar.x : p.x;
+  const pz = p.inCar ? p.inCar.z : p.z;
+
+  // Sightings: any unit within 45m refreshes the "seen" clock; out of
+  // sight long enough and heat decays.
+  let seen = false;
+  for (const cop of state.cops) if (dist2(cop.x, cop.z, px, pz) < 45 * 45) { seen = true; break; }
+  if (state.heli && dist2(state.heli.x, state.heli.z, px, pz) < 70 * 70) seen = true;
+  if (seen) state.lastSeenT = state.time;
+  if (state.time - state.lastSeenT > 11 && state.stars > 0) {
+    state.heat = Math.max(0, state.heat - dt * 0.045);
+    state.stars = clamp(Math.floor(state.heat), 0, 5);
+  }
+
+  // Patrol strength by star level.
+  const desired = [0, 2, 3, 4, 5, 6][state.stars];
+  const patrols = state.cops.filter((c) => !c.roadblock);
+  if (patrols.length < desired) {
+    state.spawnT -= dt;
+    if (state.spawnT <= 0) { spawnPatrol(state); state.spawnT = 1.4; }
+  }
+  // Cull units that fell far behind.
+  state.cops = state.cops.filter((c) => c.roadblock || dist2(c.x, c.z, px, pz) < 130 * 130 || patrols.length <= desired);
+
+  // Roadblocks at four stars and up.
+  state.roadblockCd -= dt;
+  const hasBlock = state.cops.some((c) => c.roadblock);
+  if (state.stars >= 4 && !hasBlock && state.roadblockCd <= 0 && p.inCar) spawnRoadblock(state);
+  if (hasBlock) {
+    // A block the player has blown past is cleared away.
+    state.cops = state.cops.filter((c) => !c.roadblock || dist2(c.x, c.z, px, pz) < 85 * 85);
+  }
+
+  // The helicopter at five stars.
+  if (state.stars >= 5 && !state.heli) {
+    state.heli = { x: px + 30, z: pz - 30, h: 27, ry: 0 };
+    state.events.push({ name: 'heli', data: 0 });
+  }
+  if (state.stars < 5 && state.heli) state.heli = null;
+  if (state.heli) {
+    const heli = state.heli;
+    const tx = px + Math.sin(state.time * 0.24) * 7;
+    const tz = pz + Math.cos(state.time * 0.19) * 7;
+    heli.x += (tx - heli.x) * Math.min(1, dt * 1.6);
+    heli.z += (tz - heli.z) * Math.min(1, dt * 1.6);
+    heli.h = 27 + Math.sin(state.time * 0.7) * 1.5;
+    heli.ry = Math.atan2(px - heli.x, pz - heli.z);
+    state.spotTarget = { x: px, z: pz };
+  }
+
+  // Pursuit driving: aim at the player's near future, drive hard,
+  // and shove when alongside.
+  const pvx = p.inCar ? Math.sin(p.inCar.ry) * p.inCar.speed : 0;
+  const pvz = p.inCar ? Math.cos(p.inCar.ry) * p.inCar.speed : 0;
+  for (const cop of state.cops) {
+    if (cop.roadblock || cop.exploded) { cop.speed = 0; continue; }
+    cop.ramCd -= dt;
+    const aimX = px + pvx * 0.55, aimZ = pz + pvz * 0.55;
+    const want = Math.atan2(aimX - cop.x, aimZ - cop.z);
+    cop.ry = turnToward(cop.ry, want, dt * (cop.pit ? 1.9 : 1.5));
+    const d2 = dist2(cop.x, cop.z, px, pz);
+    const topSpeed = cop.pit ? 33 : 30.5;
+    const target = d2 > 26 * 26 ? topSpeed : topSpeed * 0.82;
+    cop.speed += clamp(target - cop.speed, -dt * 12, dt * 6.5);
+    cop.steer = clamp(((want - cop.ry + Math.PI * 3) % (Math.PI * 2)) - Math.PI, -0.5, 0.5);
+    cop.x += Math.sin(cop.ry) * cop.speed * dt;
+    cop.z += Math.cos(cop.ry) * cop.speed * dt;
+    cop.rpm = 0.45 + clamp(Math.abs(cop.speed) / 33, 0, 1) * 0.5;
+    cop.gear = 1 + Math.floor(clamp(Math.abs(cop.speed) / 33, 0, 0.99) * 4);
+    if (d2 < 3.4 * 3.4 && cop.ramCd <= 0 && p.inCar) {
+      cop.ramCd = 0.9;
+      state.events.push({ name: 'ram', data: 9 });
+      damageCar(state, p.inCar, 7);
+      state.trauma = Math.min(1, state.trauma + 0.35);
+    }
   }
 }
 
-function landPendingStars(s, dt) {
-  if (s.pendingStars == null) return;
-  s.dispatchT -= dt;
-  if (s.dispatchT > 0) return;
-  const before = s.wanted;
-  s.wanted = clamp(Math.max(s.wanted, s.pendingStars), 0, 5);
-  s.crimeHeat = Math.max(s.crimeHeat, 6 + s.wanted * 3);
-  s.pendingStars = null;
-  if (s.wanted > before) s.events.push({ name: 'wanted', data: s.wanted });
-  if (s.wanted >= 4) deployRoadblock(s);
-}
-
-export function stepCop(s, cop, dt) {
-  if (cop.kind === 'dead' || cop === s.player.inCar) return;
-  if (cop.roadblock) {
-    if (s.wanted < 4) cop.roadblock = false;
-    else return;
-  }
-  const target = s.player.inCar || s.player;
-  const dx = target.x - cop.x, dz = target.z - cop.z;
-  const gap = Math.hypot(dx, dz);
-  cop.ry = angleLerp(cop.ry, Math.atan2(dx, dz), clamp(dt * 2.2, 0, 1));
-  const ceiling = Math.min(26, 15 + s.wanted * 1.9);
-  const speedGoal = gap > 5 ? ceiling : (s.player.inCar ? ceiling * 0.55 : 0);
-  cop.speed += clamp(speedGoal - cop.speed, -20 * dt, 9 * dt);
-  let nx = cop.x + Math.sin(cop.ry) * cop.speed * dt;
-  let nz = cop.z + Math.cos(cop.ry) * cop.speed * dt;
-  const solved = collideBuildings(s.city, nx, nz, 1.6);
-  nx = solved[0]; nz = solved[1];
-  const hitPlayer = dist2(nx, nz, target.x, target.z) < 3.2 * 3.2 && Math.abs(cop.speed) > 5;
-  if (hitPlayer) {
-    if (s.player.inCar) damageCar(s, s.player.inCar, 7);
-    else s.playerAPI.hurt(s, 6);
-    cop.speed *= -0.25;
-    s.events.push({ name: 'ram' });
-  }
-  cop.x = nx; cop.z = nz;
-}
-
-function stepHeli(s, dt) {
-  if (s.wanted >= 5 && !s.heli) {
-    s.heli = { a: s.rng.range(0, 6.28), h: 28, x: s.player.x + 30, z: s.player.z };
-    s.events.push({ name: 'heli' });
-    s.msg = 'SBPD AIR UNIT — KESTREL-1 DEPLOYED'; s.msgT = 2.6;
-  }
-  if (!s.heli) return;
-  if (s.wanted <= 3) { s.heli = null; return; }
-  s.heli.a += dt * 0.22;
-  s.heli.x = s.player.x + Math.sin(s.heli.a) * 30;
-  s.heli.z = s.player.z + Math.cos(s.heli.a) * 30;
-}
-
-export function stepWanted(s, dt) {
-  landPendingStars(s, dt);
-  stepHeli(s, dt);
-  if (s.crimeHeat > 0) s.crimeHeat -= dt;
-  else if (s.wanted > 0) {
-    const copNearby = s.cops.some((c) => dist2(c.x, c.z, s.player.x, s.player.z) < 45 * 45);
-    if (!copNearby) {
-      s.wantedDecay = (s.wantedDecay || 0) + dt;
-      if (s.wantedDecay > 6) { s.wanted--; s.wantedDecay = 0; s.events.push({ name: 'wanted', data: s.wanted }); }
-    } else s.wantedDecay = 0;
-  }
-  const desired = s.wanted === 0 ? 0 : COP_COUNTS[s.wanted];
-  const active = s.cops.filter((c) => c.kind === 'cop' && !c.roadblock).length;
-  if (active < desired && s.rng.chance(dt * 1.5)) deployPursuit(s);
-  if (s.wanted === 0) { s.cops = s.cops.filter((c) => c === s.player.inCar); s.bustTimer = 0; }
-  const playerSpeed = s.player.inCar ? Math.abs(s.player.inCar.speed) : 0;
-  let copInReach = false;
-  if (s.wanted > 0 && playerSpeed < 2) copInReach = s.cops.some((c) => c.kind === 'cop' && dist2(c.x, c.z, s.player.x, s.player.z) < 5.5 * 5.5);
-  s.bustTimer = copInReach ? s.bustTimer + dt : Math.max(0, s.bustTimer - dt * 1.4);
-  for (const cop of s.cops.slice()) stepCop(s, cop, dt);
-  if (s.bustTimer > 2.5 && s.mode === 'play') {
-    s.mode = 'busted';
-    s.fine = Math.min(100 + s.wanted * 150, s.cash);
-    s.events.push({ name: 'busted', data: s.fine });
+// Shared car-damage ladder: smoke, then fire, then the explosion the
+// event system turns into noise and shrapnel.
+export function damageCar(state, car, amount) {
+  if (!car || car.exploded) return;
+  car.hp -= amount;
+  if (car.hp < 55 && car.smoke === 0) car.smoke = 1;
+  if (car.hp < 26 && car.smoke === 1) { car.smoke = 2; car.burning = 2.6; }
+  if (car.hp <= 0 && !car.exploded) {
+    car.exploded = true;
+    car.kind = 'dead';
+    car.speed = 0;
+    state.events.push({ name: 'explode', data: car });
   }
 }

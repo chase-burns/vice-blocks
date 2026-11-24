@@ -1,120 +1,89 @@
-// pedestrians.js — the people on the sidewalks, each a small state
-// machine: stroll along a pavement, sometimes cross the road, flee from
-// danger (a fast car, nearby gunfire, an aimed weapon), and — held at
-// close gunpoint long enough — put their hands up and drop a wallet
-// pickup. Clothing colours are deliberately bright, so a pedestrian
-// still reads as a person at screenshot size.
-import { clamp, dist2 } from '../rng.js';
-import { roadCenters, CITY_HALF, collideBuildings } from './world.js';
+// pedestrians.js — the people on the sidewalks. Each walker picks
+// stroll targets along the pavement, ambles between them, and reacts:
+// fleeing from gunfire, crashes and speeding cars, throwing their
+// hands up when a gun is pointed at them (which is how robberies
+// happen), and falling when shot.
 
-export const PED_COLORS = [
-  [0.98, 0.45, 0.35], [0.25, 0.75, 0.85], [0.98, 0.85, 0.30], [0.95, 0.55, 0.75],
-  [0.45, 0.90, 0.55], [0.98, 0.98, 0.95], [0.55, 0.45, 0.95], [0.98, 0.65, 0.25],
-  [0.30, 0.55, 0.98], [0.90, 0.30, 0.45], [0.35, 0.85, 0.65], [0.95, 0.75, 0.55],
-];
-export const PANTS = [
-  [0.20, 0.26, 0.45], [0.85, 0.80, 0.68], [0.16, 0.16, 0.18],
-  [0.55, 0.42, 0.30], [0.92, 0.92, 0.90], [0.35, 0.45, 0.30],
-];
-export const SKINS = [
-  [0.98, 0.80, 0.64], [0.88, 0.66, 0.48], [0.68, 0.47, 0.32], [0.48, 0.32, 0.21],
-];
+import { createRng, clamp, dist2 } from '../rng.js';
+import { ROAD, CITY_HALF } from './world.js';
 
-export function spawnPed(s, rng) {
-  void s;
-  const lines = roadCenters();
-  const road = lines[rng.int(0, lines.length - 1)];
-  const horiz = rng.chance(0.5);
-  const along = rng.range(-CITY_HALF, CITY_HALF);
-  const sideOff = (rng.chance(0.5) ? 1 : -1) * rng.range(8.6, 10.5);
+const SHIRTS = [
+  [0.95, 0.55, 0.45], [0.45, 0.75, 0.9], [0.95, 0.85, 0.4], [0.55, 0.9, 0.65],
+  [0.9, 0.6, 0.85], [0.95, 0.95, 0.95], [0.4, 0.5, 0.75], [1, 0.7, 0.35],
+];
+const TROUSERS = [[0.22, 0.24, 0.34], [0.35, 0.3, 0.25], [0.5, 0.52, 0.55], [0.25, 0.35, 0.3]];
+const SKIN = [[0.92, 0.76, 0.6], [0.98, 0.84, 0.68], [0.72, 0.52, 0.38], [0.55, 0.38, 0.26]];
+
+export function makePed(rng, x, z) {
   return {
-    x: horiz ? along : road + sideOff, z: horiz ? road + sideOff : along,
-    ry: rng.range(0, Math.PI * 2), speed: rng.range(1.2, 1.6),
-    horiz, road, side: sideOff, dir: rng.chance(0.5) ? 1 : -1,
-    color: PED_COLORS[rng.int(0, PED_COLORS.length - 1)],
-    pants: PANTS[rng.int(0, PANTS.length - 1)],
-    skin: SKINS[rng.int(0, SKINS.length - 1)],
-    state: 'walk', t: rng.range(2, 6), cash: rng.int(50, 250), robbed: false, aimTime: 0,
+    x, z, ry: rng.range(0, Math.PI * 2),
+    speed: 0, hp: 30,
+    state: 'walk', stateT: 0,
+    color: SHIRTS[rng.int(0, SHIRTS.length - 1)],
+    pants: TROUSERS[rng.int(0, TROUSERS.length - 1)],
+    skin: SKIN[rng.int(0, SKIN.length - 1)],
+    tx: x, tz: z, _phase: rng.range(0, 6),
+    robbed: false,
   };
 }
 
-// Move a far-away walker onto a sidewalk 20–52 m from the player.
-export function placePedNear(s, ped, rng) {
-  const lines = roadCenters(), p = s.player;
-  let roadNearX = lines[0], roadNearZ = lines[0], bestX = Infinity, bestZ = Infinity;
-  for (const c of lines) {
-    const dx = Math.abs(p.x - c); if (dx < bestX) { bestX = dx; roadNearX = c; }
-    const dz = Math.abs(p.z - c); if (dz < bestZ) { bestZ = dz; roadNearZ = c; }
+export function spawnPeds(state, count) {
+  const rng = createRng(state.seed * 57 + 13);
+  const centers = [];
+  for (let k = -3; k <= 3; k++) centers.push(k * 46);
+  for (let i = 0; i < count; i++) {
+    const road = centers[rng.int(0, centers.length - 1)];
+    const side = rng.chance(0.5) ? 1 : -1;
+    const along = rng.range(-CITY_HALF, CITY_HALF);
+    const vertical = rng.chance(0.5);
+    const x = vertical ? road + side * (ROAD / 2 + 1.6) : along;
+    const z = vertical ? along : road + side * (ROAD / 2 + 1.6);
+    state.peds.push(makePed(rng, x, z));
   }
-  const horiz = rng.chance(0.5);
-  const shift = rng.range(20, 52) * (rng.chance(0.5) ? 1 : -1);
-  const sideOff = (rng.chance(0.5) ? 1 : -1) * rng.range(8.8, 10.4);
-  if (horiz) { ped.x = clamp(p.x + shift, -CITY_HALF, CITY_HALF); ped.z = roadNearZ + sideOff; ped.road = roadNearZ; }
-  else { ped.x = roadNearX + sideOff; ped.z = clamp(p.z + shift, -CITY_HALF, CITY_HALF); ped.road = roadNearX; }
-  ped.horiz = horiz; ped.side = sideOff; ped.state = 'walk'; ped.t = rng.range(3, 7);
-  ped.dir = rng.chance(0.5) ? 1 : -1;
-  return ped;
 }
 
-function feelsThreatened(s, ped) {
-  const pl = s.player;
-  if (pl.inCar && dist2(ped.x, ped.z, pl.inCar.x, pl.inCar.z) < 12 * 12 && (pl.inCar.velSpeed || 0) > 6) return true;
-  if (pl.aim && dist2(ped.x, ped.z, pl.x, pl.z) < 10 * 10) return true;
-  if (s.gunfireT > 0 && dist2(ped.x, ped.z, s.gunfireX, s.gunfireZ) < 30 * 30) return true;
-  return false;
+function pickStrollTarget(state, ped) {
+  const rng = state.rng;
+  ped.tx = clamp(ped.x + rng.range(-38, 38), -CITY_HALF - 6, CITY_HALF + 26);
+  ped.tz = clamp(ped.z + rng.range(-38, 38), -CITY_HALF - 6, CITY_HALF + 6);
 }
 
-function pushOutOfBuildings(s, ped) {
-  const solved = collideBuildings(s.city, ped.x, ped.z, 0.5);
-  ped.x = solved[0]; ped.z = solved[1];
-}
+export function stepPeds(state, dt) {
+  const p = state.player;
+  for (const ped of state.peds) {
+    if (ped.state === 'dead') { ped.speed = 0; continue; }
+    ped.stateT -= dt;
+    const nearPlayer = dist2(ped.x, ped.z, p.x, p.z) < 9 * 9;
+    const playerThreat = !p.inCar && state.hasGun && p.aim && nearPlayer &&
+      dist2(ped.x, ped.z, p.x, p.z) < 6.5 * 6.5;
 
-export function stepPed(s, ped, dt) {
-  if (ped.state === 'dead') { ped.t -= dt; return; }
-  const pl = s.player;
-  const scared = feelsThreatened(s, ped);
-  if (scared && ped.state !== 'robbed' && ped.state !== 'handsup') ped.state = 'flee';
-  const gunpoint = pl.aim && s.hasGun && !pl.inCar && !ped.robbed && dist2(ped.x, ped.z, pl.x, pl.z) < 6 * 6;
-  if (gunpoint) {
-    ped.aimTime += dt; ped.state = 'handsup';
-    if (ped.aimTime >= 1.5) {
-      ped.robbed = true; ped.state = 'robbed'; ped.t = 1.6;
-      s.pickups.push({ x: ped.x, z: ped.z, cash: ped.cash, t: 25 });
-      s.events.push({ name: 'robDrop', data: ped.cash });
-      s.wantedAPI.add(s, 1, true);
+    if (ped.state === 'walk') {
+      if (playerThreat) { ped.state = 'handsup'; ped.stateT = 1.2; }
+      else if (state.alarmT > state.time - 1.2 && dist2(ped.x, ped.z, state.alarmX, state.alarmZ) < 16 * 16) {
+        ped.state = 'flee'; ped.stateT = 2.6;
+        ped.tx = ped.x + (ped.x - state.alarmX) * 2;
+        ped.tz = ped.z + (ped.z - state.alarmZ) * 2;
+      }
+    } else if (ped.state === 'handsup') {
+      ped.speed = 0;
+      if (!playerThreat && ped.stateT <= 0) { ped.state = 'flee'; ped.stateT = 1.6; ped.tx = ped.x - (p.x - ped.x) * 2; ped.tz = ped.z - (p.z - ped.z) * 2; }
+      continue;
+    } else if (ped.state === 'flee' && ped.stateT <= 0) {
+      ped.state = 'walk';
+      pickStrollTarget(state, ped);
     }
-  } else ped.aimTime = Math.max(0, ped.aimTime - dt * 2);
-  if (ped.state === 'handsup') return;
-  if (ped.state === 'flee') {
-    const danger = s.gunfireT > 0 ? { x: s.gunfireX, z: s.gunfireZ } : (pl.inCar || pl);
-    const dx = ped.x - danger.x, dz = ped.z - danger.z, len = Math.hypot(dx, dz) || 1;
-    ped.x += (dx / len) * 5.2 * dt; ped.z += (dz / len) * 5.2 * dt;
-    ped.ry = Math.atan2(dx, dz); ped.t -= dt;
-    if (ped.t < -3 && !scared) ped.state = 'walk';
-    pushOutOfBuildings(s, ped); return;
+
+    const speed = ped.state === 'flee' ? 4.3 : 1.35;
+    const dx = ped.tx - ped.x, dz = ped.tz - ped.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.8) {
+      if (ped.state === 'walk') pickStrollTarget(state, ped);
+      ped.speed = 0;
+      continue;
+    }
+    ped.ry = Math.atan2(dx, dz);
+    ped.speed = speed;
+    ped.x += Math.sin(ped.ry) * speed * dt;
+    ped.z += Math.cos(ped.ry) * speed * dt;
   }
-  if (ped.state === 'robbed') {
-    ped.t -= dt;
-    if (ped.t <= 0) { ped.state = 'flee'; ped.t = 2; }
-    return;
-  }
-  if (ped.state === 'cross') {
-    const offNow = ped.horiz ? ped.z - ped.road : ped.x - ped.road;
-    const stepSize = Math.sign(-ped.side - offNow) * 1.5 * dt;
-    if (ped.horiz) { ped.z += stepSize; ped.ry = stepSize > 0 ? 0 : Math.PI; }
-    else { ped.x += stepSize; ped.ry = stepSize > 0 ? Math.PI / 2 : -Math.PI / 2; }
-    const offAfter = ped.horiz ? ped.z - ped.road : ped.x - ped.road;
-    if (Math.abs(offAfter - (-ped.side)) < 0.6) { ped.side = -ped.side; ped.state = 'walk'; ped.t = s.rng.range(3, 7); }
-    return;
-  }
-  ped.t -= dt;
-  if (ped.t <= 0) {
-    if (s.rng.chance(0.22)) { ped.state = 'cross'; return; }
-    ped.dir *= -1; ped.t = s.rng.range(3, 8);
-  }
-  const pace = ped.speed * ped.dir;
-  if (ped.horiz) { ped.x += pace * dt; ped.ry = pace > 0 ? Math.PI / 2 : -Math.PI / 2; }
-  else { ped.z += pace * dt; ped.ry = pace > 0 ? 0 : Math.PI; }
-  if (Math.abs(ped.x) > CITY_HALF || Math.abs(ped.z) > CITY_HALF) ped.dir *= -1;
-  pushOutOfBuildings(s, ped);
 }

@@ -1,201 +1,191 @@
-// hud.js — everything drawn on top of the 3D view: the DOM dashboard
-// (health and armour bars, cash, wanted stars, RESPECT rank, weapon
-// line, speed, mission text, bust meter, contextual prompts), the SBPD
-// dispatch board that names each responding unit, the weapon-slot
-// chips, and the rotating circular minimap painted on a 2D canvas.
-import { roadCenters, CITY_HALF, districtAt } from './world.js';
-import { WEAPONS, WEAPON_ORDER, ownsWeapon, activeWeapon } from './player.js';
+// hud.js — everything flat that sits over the 3D view: bars, cash,
+// stars, the mission line and countdown, the SBPD dispatch board,
+// weapon slots, prompts, and the rotating circular minimap. The DOM
+// side only writes text and styles; the minimap is a 2D canvas.
 
-export function mph(ms) { return Math.round(Math.abs(ms) * 2.23694); }
+import { clamp, dist2 } from '../rng.js';
+import { districtAt, CITY_HALF } from './world.js';
+import { weaponDef, WEAPONS, WEAPON_ORDER, rankFor } from './player.js';
 
-const RANK_LADDER = [{ at: 700, name: 'KINGPIN' }, { at: 300, name: 'OPERATOR' }, { at: 0, name: 'RUNNER' }];
-export function rankName(respect) {
-  for (const tier of RANK_LADDER) if (respect >= tier.at) return tier.name;
-  return 'RUNNER';
+const RANK_BANDS = [[0, 150], [150, 450], [450, 900]];
+const RADIO_NAMES = ['OFF', 'VICE FM', 'SOLMAR'];
+const SLOT_LABELS = { pistol: '9MM', smg: 'SMG', shotgun: '12G', rifle: 'AR' };
+const OWNED_FIELD = { pistol: 'hasGun', smg: 'hasSmg', shotgun: 'hasShotgun', rifle: 'hasRifle' };
+
+function fmtCash(cash) {
+  return '$' + String(Math.max(0, Math.round(cash))).padStart(7, '0');
 }
 
-export function drawMinimap(s, mm) {
-  const SIZE = 168, cx = SIZE / 2, cy = SIZE / 2;
-  const heading = s.player.inCar ? s.player.inCar.ry : s.camYaw;
-  mm.clearRect(0, 0, SIZE, SIZE);
-  mm.save();
-  mm.beginPath(); mm.arc(cx, cy, cx - 2, 0, 7); mm.clip();
-  mm.fillStyle = '#ddd2b8'; mm.fillRect(0, 0, SIZE, SIZE);
-  mm.translate(cx, cy); mm.rotate(-heading); mm.scale(0.55, 0.55);
-  mm.translate(-s.player.x, -s.player.z);
-  mm.strokeStyle = '#8a7f6d'; mm.lineWidth = 7;
-  for (const c of roadCenters()) {
-    mm.beginPath(); mm.moveTo(c, -CITY_HALF - 20); mm.lineTo(c, CITY_HALF + 20); mm.stroke();
-    mm.beginPath(); mm.moveTo(-CITY_HALF - 20, c); mm.lineTo(CITY_HALF + 20, c); mm.stroke();
+function playerPos(state) {
+  const p = state.player;
+  return p.inCar ? { x: p.inCar.x, z: p.inCar.z } : { x: p.x, z: p.z };
+}
+
+function dispatchLines(state) {
+  const pos = playerPos(state);
+  const units = [];
+  if (state.heli) units.push({ tag: '▲ KESTREL-1 · AIR SUPPORT', d: Math.hypot(state.heli.x - pos.x, state.heli.z - pos.z) });
+  for (const cop of state.cops) {
+    const d = Math.round(Math.hypot(cop.x - pos.x, cop.z - pos.z));
+    if (cop.roadblock) units.push({ tag: '■ ROADBLOCK', d });
+    else if (cop.pit) units.push({ tag: '● PIT UNIT', d });
+    else units.push({ tag: '◆ PATROL', d });
   }
-  mm.lineWidth = 1;
-  const dot = (x, z, color, r) => { mm.fillStyle = color; mm.beginPath(); mm.arc(x, z, r, 0, 7); mm.fill(); };
-  const zoneSet = s.city.zones;
-  dot(zoneSet.spray.x, zoneSet.spray.z, '#3dff7a', 4);
-  dot(zoneSet.gunshop.x, zoneSet.gunshop.z, '#ff4040', 4);
-  mm.fillStyle = '#ffffff';
-  mm.fillRect(zoneSet.hospital.x - 4.5, zoneSet.hospital.z - 1.5, 9, 3);
-  mm.fillRect(zoneSet.hospital.x - 1.5, zoneSet.hospital.z - 4.5, 3, 9);
-  for (const cop of s.cops) {
-    if (cop.kind !== 'cop') continue;
-    if (cop.roadblock) { mm.fillStyle = '#ff9020'; mm.fillRect(cop.x - 4, cop.z - 4, 8, 8); }
-    else dot(cop.x, cop.z, Math.floor(s.time * 3) % 2 ? '#ff4040' : '#4080ff', 3.4);
+  units.sort((a, b) => a.d - b.d);
+  return units;
+}
+
+export function updateHUD(state, ui, nearCarFn) {
+  const p = state.player;
+  const titleLike = state.mode === 'title' || state.mode === 'busted' || state.mode === 'wasted' || state.mode === 'paused';
+  ui.hud.style.display = titleLike ? 'none' : 'block';
+  ui.overlay.style.display = titleLike ? 'flex' : 'none';
+  if (state.mode === 'title') {
+    ui.ovTitle.textContent = 'VICE BLOCKS 3D';
+    ui.ovSub.textContent = 'PRESS ANY KEY TO HIT THE STREETS';
+    ui.ovFeat.textContent = '8 STORY MISSIONS · 5-STAR WANTED · HELICOPTER + ROADBLOCKS · 2 RADIO STATIONS · 4 WEAPONS · RESPECT RANKS · GARAGE UPGRADES';
+    const owned = WEAPON_ORDER.filter((w) => state[OWNED_FIELD[w]]).length;
+    ui.ovSave.textContent = (state.missionIdx > 0 || state.cash > 0)
+      ? `CONTINUE — MISSIONS ${state.missionIdx}/8 · $${Math.round(state.cash)} · RESPECT ${rankFor(state.respect)} · ${owned} WEAPONS`
+      : 'NEW GAME — TAKE JOBS FROM THE CONTACT (E)';
+    return;
   }
-  if (s.heli) dot(s.heli.x, s.heli.z, '#ffffff', 3.2);
-  for (const car of s.cars) if (car.kind === 'traffic') dot(car.x, car.z, '#c8c8c8', 1.8);
-  for (const pk of s.pickups) dot(pk.x, pk.z, '#3dff7a', 3);
-  const goal = (s.mission && s.mission.target) || (s.taxi && s.taxi.target);
-  if (goal) dot(goal.x, goal.z, '#ffe14f', 4.6);
-  mm.restore();
-  mm.fillStyle = '#ffffff';
-  mm.beginPath(); mm.moveTo(cx, cy - 6); mm.lineTo(cx - 4, cy + 5); mm.lineTo(cx + 4, cy + 5); mm.closePath(); mm.fill();
-}
+  if (state.mode === 'busted') { ui.ovTitle.textContent = 'BUSTED'; ui.ovSub.textContent = 'CLICK OR PRESS ANY KEY'; ui.ovFeat.textContent = ''; ui.ovSave.textContent = ''; return; }
+  if (state.mode === 'wasted') { ui.ovTitle.textContent = 'WASTED'; ui.ovSub.textContent = 'CLICK OR PRESS ANY KEY'; ui.ovFeat.textContent = ''; ui.ovSave.textContent = ''; return; }
+  if (state.mode === 'paused') { ui.ovTitle.textContent = 'PAUSED'; ui.ovSub.textContent = 'P OR CLICK TO RESUME'; ui.ovFeat.textContent = ''; ui.ovSave.textContent = ''; return; }
 
-function starsText(wanted) {
-  let text = '';
-  for (let i = 0; i < 5; i++) text += i < wanted ? '★' : '☆';
-  return text;
-}
+  ui.health.style.width = clamp(p.hp, 0, 100) + '%';
+  ui.armor.style.width = clamp(p.armor, 0, 100) + '%';
+  ui.cash.textContent = fmtCash(state.cash);
+  ui.stars.textContent = '★'.repeat(state.stars) + '☆'.repeat(5 - state.stars);
+  ui.stars.style.opacity = state.stars > 0 ? '1' : '0.35';
+  const rank = rankFor(state.respect);
+  ui.rank.textContent = 'RESPECT · ' + rank;
+  const band = RANK_BANDS[rank === 'KINGPIN' ? 2 : rank === 'OPERATOR' ? 1 : 0];
+  ui.respectfill.style.width = (clamp((state.respect - band[0]) / (band[1] - band[0]), 0, 1) * 100) + '%';
 
-function statusLine(s, car) {
-  if (car) {
-    const gearText = car.gear === 0 ? 'R' : (car.gear == null ? 'N' : car.gear);
-    let line = 'GEAR ' + gearText + ' · ' + (car.isDrifting ? 'DRIFT!' : '');
-    if (s.radio) line += ' · RADIO ' + (s.radio === 1 ? 'VICE FM' : 'SOLMAR');
-    return line;
+  // Mission / taxi line and the big centre countdown.
+  let missionText = '';
+  let timerText = '';
+  if (state.mission) {
+    missionText = state.mission.text;
+    if (state.mission.timer != null) {
+      const secs = Math.max(0, Math.ceil(state.mission.timer));
+      timerText = state.mission.kind === 'survive' && state.mission.phase === 'main' ? 'SURVIVE ' + secs + 's' : secs + 's';
+    }
+  } else if (state.taxi) {
+    missionText = state.taxi.phase === 'pickup' ? 'TAXI — PICK UP THE FARE' : 'TAXI — DROP THEM OFF';
+    if (state.taxi.timer != null) timerText = Math.max(0, Math.ceil(state.taxi.timer)) + 's';
   }
-  if (!s.hasGun) return 'UNARMED';
-  const def = WEAPONS[activeWeapon(s)];
-  let line = def.label + ' ' + s[def.mag] + ' / ' + s.reserve;
-  if (s.reloadT > 0) line += ' · RELOADING';
-  return line;
-}
+  ui.mission.textContent = missionText;
+  ui.timer.textContent = timerText;
+  ui.timer.style.display = timerText ? 'block' : 'none';
 
-function paintWeaponSlots(s, ui, hudOn) {
-  if (!ui.slots) return;
-  const visible = s.hasGun && hudOn;
-  ui.slots.style.display = visible ? 'flex' : 'none';
-  if (!visible) return;
-  const markup = WEAPON_ORDER.map((key, i) => {
-    const owned = ownsWeapon(s, key);
-    const equipped = activeWeapon(s) === key && !s.player.inCar;
-    const chipCss = equipped
-      ? 'border:1px solid #ffd94f;color:#ffd94f;background:rgba(30,22,4,.72)'
-      : owned
-        ? 'border:1px solid rgba(255,255,255,.5);color:#fff;background:rgba(10,6,16,.6)'
-        : 'border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.35);background:rgba(10,6,16,.45)';
-    return '<div style="' + chipCss + ';border-radius:6px;padding:4px 8px;font-size:11.5px;font-weight:800;letter-spacing:1px;text-shadow:0 1px 0 #000">' + (i + 1) + ' ' + WEAPONS[key].short + '</div>';
+  // Dispatch board while the law is interested.
+  const units = dispatchLines(state);
+  if (units.length && (state.stars > 0 || state.shotMode === 'chase')) {
+    let html = `<div class="dhead">SBPD DISPATCH · ${units.length} UNITS</div>`;
+    for (const u of units.slice(0, 5)) html += `<div>${u.tag}${u.tag.includes('KESTREL') ? '' : ' · ' + u.d + 'm'}</div>`;
+    if (units.length > 5) html += `<div class="dmore">+${units.length - 5} more</div>`;
+    ui.dispatch.innerHTML = html;
+    ui.dispatch.style.display = 'block';
+  } else {
+    ui.dispatch.style.display = 'none';
+  }
+
+  ui.district.textContent = districtAt(p.x, p.z);
+  ui.banner.textContent = state.bannerT > 0 ? state.banner : '';
+  ui.banner.style.display = state.bannerT > 0 ? 'block' : 'none';
+  ui.msg.textContent = state.msgT > 0 ? state.msg : '';
+  ui.msg.style.display = state.msgT > 0 ? 'block' : 'none';
+
+  // Speed block (in a car) or weapon readout (on foot).
+  if (p.inCar) {
+    const car = p.inCar;
+    const mph = Math.round(Math.abs(car.speed || 0) * 2.23694);
+    ui.speed.innerHTML = `${mph} MPH<div class="sgear">GEAR ${car.gear || 1}${car.isDrifting ? ' · DRIFT!' : ''} · RADIO ${RADIO_NAMES[state.radio] || 'OFF'}</div>`;
+    ui.speed.style.display = 'block';
+    ui.weapon.style.display = 'none';
+  } else {
+    ui.speed.style.display = 'none';
+    if (state.hasGun) {
+      const def = weaponDef(state);
+      const ammo = state.ammo[state.weapon];
+      ui.weapon.textContent = `${def.label === '9MM' ? 'PISTOL' : def.label === '12G' ? 'SHOTGUN' : def.label === 'SMG' ? 'SMG' : 'RIFLE'} ${ammo.mag} / ${ammo.res}${state.reloadT > 0 ? ' · RELOADING' : ''}`;
+      ui.weapon.style.display = 'block';
+    } else ui.weapon.style.display = 'none';
+  }
+  ui.slots.innerHTML = WEAPON_ORDER.map((w, i) => {
+    const owned = state[OWNED_FIELD[w]];
+    const cls = !owned ? 'slot dim' : state.weapon === w ? 'slot on' : 'slot';
+    return `<span class="${cls}">${i + 1} ${SLOT_LABELS[w]}</span>`;
   }).join('');
-  if (ui.slots._html !== markup) { ui.slots.innerHTML = markup; ui.slots._html = markup; }
-}
 
-function paintDispatchBoard(s, ui, hudOn) {
-  if (!ui.dispatch) return;
-  const entries = [];
-  if (s.heli) entries.push('▲ KESTREL-1 · AIR SUPPORT');
-  for (const cop of s.cops) {
-    if (cop.kind !== 'cop') continue;
-    const range = Math.round(Math.hypot(cop.x - s.player.x, cop.z - s.player.z));
-    if (cop.roadblock) entries.push('■ ROADBLOCK · ' + range + 'm');
-    else {
-      const role = Math.abs(cop.z - s.player.z) > Math.abs(cop.x - s.player.x) ? 'PIT UNIT' : 'PATROL';
-      entries.push((entries.length % 2 ? '◆' : '●') + ' ' + role + ' · ' + range + 'm');
-    }
-  }
-  const visible = s.wanted > 0 && hudOn && entries.length > 0;
-  ui.dispatch.style.display = visible ? 'block' : 'none';
-  if (!visible) return;
-  const rows = entries.slice(0, 5).join('<br>') + (entries.length > 5 ? '<br>+' + (entries.length - 5) + ' more' : '');
-  const markup = '<span class="dhead">SBPD DISPATCH · ' + entries.length + ' UNITS</span><br>' + rows;
-  if (ui.dispatch._html !== markup) { ui.dispatch.innerHTML = markup; ui.dispatch._html = markup; }
-}
-
-function promptFor(s, nearCarFn, inCar) {
-  const p = s.player;
-  const distSq = (zone) => (p.x - zone.x) ** 2 + (p.z - zone.z) ** 2;
-  if (!inCar) {
-    if (nearCarFn()) return 'F — STEAL / ENTER CAR';
-    const zoneSet = s.city.zones;
-    if (distSq(zoneSet.gunshop) < zoneSet.gunshop.r * zoneSet.gunshop.r) {
-      const nextUp = WEAPON_ORDER.find((w) => !ownsWeapon(s, w));
-      return nextUp ? 'AMMU-NATION — E BUY ' + WEAPONS[nextUp].label + ' $' + WEAPONS[nextUp].price : 'AMMU-NATION — E RESTOCKS AMMO';
-    }
-    if (distSq(zoneSet.hospital) < zoneSet.hospital.r * zoneSet.hospital.r) return 'HOSPITAL — HEALING…';
-    return '';
-  }
-  const spray = s.city.zones.spray;
-  return distSq(spray) < spray.r * spray.r ? "PAY 'N SPRAY — $100 CLEARS STARS" : 'F — EXIT CAR · T — TAXI JOB · SPACE — DRIFT';
-}
-
-const OVERLAY_TEXT = {
-  title: ['VICE BLOCKS 3D', 'PRESS ANY KEY TO HIT THE STREETS'],
-  paused: ['PAUSED', 'Click or press Enter to resume'],
-  busted: ['BUSTED', ''],
-  wasted: ['WASTED', ''],
-};
-
-export function updateHUD(s, ui, nearCarFn) {
-  const playing = s.mode === 'play' || s.mode === 'paused';
-  const hudOn = playing || (s.shotMode && s.mode !== 'title');
-  ui.hud.style.display = hudOn ? 'block' : 'none';
-  ui.health.style.width = Math.max(0, s.health) + '%';
-  ui.armor.style.width = Math.max(0, s.armor) + '%';
-  ui.cash.textContent = '$' + String(Math.max(0, s.cash)).padStart(7, '0');
-  ui.stars.textContent = starsText(s.wanted);
-  ui.stars.style.color = s.wanted ? '#FFD700' : '#2A2A38';
-  ui.stars.style.textShadow = s.wanted ? '0 0 10px rgba(255,215,0,.9)' : 'none';
-  const car = s.player.inCar;
-  ui.weapon.textContent = statusLine(s, car);
-  ui.speed.textContent = car ? mph(car.speed) + ' MPH' : '';
-  paintWeaponSlots(s, ui, playing || !!s.shotMode);
-  paintDispatchBoard(s, ui, playing || !!s.shotMode);
-  if (ui.district) {
-    const name = hudOn ? districtAt(s.city, s.player.x, s.player.z) : '';
-    if (ui.district._text !== name) { ui.district.textContent = name; ui.district._text = name; }
-  }
-  if (ui.respectfill) {
-    const respect = s.respect || 0;
-    ui.respectfill.style.width = Math.min(100, (respect % 300) / 3) + '%';
-    ui.rank.textContent = 'RESPECT · ' + rankName(respect);
-  }
-  ui.banner.style.display = s.bannerT > 0 ? 'block' : 'none';
-  ui.banner.textContent = s.banner || '';
-  ui.banner.style.color = s.bannerColor || '#ff7b3c';
-  ui.msg.style.display = s.msgT > 0 ? 'block' : 'none';
-  ui.msg.textContent = s.msg || '';
-  const job = s.mission || s.taxi;
-  ui.mission.textContent = playing && job ? (job.name || 'TAXI') + ' — ' + (job.desc || 'Pick up and drop off.') : '';
-  const m = s.mission, fare = s.taxi;
-  const clock = m && m.timer > 0 ? m.timer : fare && fare.timer;
-  ui.timer.textContent = playing && clock > 0 ? Math.ceil(clock) + 's' : (m && m.idx === 4 && m.surviveT > 0 ? 'SURVIVE ' + Math.ceil(m.surviveT) + 's' : '');
-  const busting = s.bustTimer > 0.15 && s.wanted > 0;
+  // Bust meter.
+  const busting = state.bust > 0.02;
   ui.bustbar.style.display = busting ? 'block' : 'none';
-  ui.bustfill.style.width = Math.min(100, s.bustTimer / 2.5 * 100) + '%';
-  ui.prompt.textContent = playing ? promptFor(s, nearCarFn, !!car) : '';
-  ui.prompt.style.display = s.shotMode ? 'none' : 'block';
-  if (ui.speedfx) {
-    const speedMag = car ? Math.abs(car.speed || 0) : 0;
-    ui.speedfx.style.opacity = String(Math.max(0, Math.min(1, (speedMag - 20) / 30)) * 0.9);
+  ui.bustfill.style.width = (state.bust * 100) + '%';
+
+  // Context prompt.
+  let prompt = '';
+  const zones = state.city.zones;
+  if (p.inCar) {
+    if (dist2(zones.spray.x, zones.spray.z, p.x, p.z) < 7 * 7) prompt = "E — PAY 'N SPRAY";
+  } else if (nearCarFn(state)) prompt = 'F — ENTER VEHICLE';
+  else if (dist2(zones.gunshop.x, zones.gunshop.z, p.x, p.z) < 6 * 6) prompt = 'E — AMMU-NATION';
+  else if (dist2(zones.contact.x, zones.contact.z, p.x, p.z) < 6 * 6) prompt = 'E — TAKE THE JOB';
+  else if (dist2(zones.hospital.x, zones.hospital.z, p.x, p.z) < 6 * 6) prompt = 'E — GET PATCHED UP';
+  else if (state.hasGun) prompt = 'T — TAXI WORK · F — CAR · E — INTERACT';
+  ui.prompt.textContent = prompt;
+}
+
+export function drawMinimap(state, ctx) {
+  const size = 168, centre = size / 2, scale = 0.52;
+  const p = state.player;
+  const heading = p.inCar ? p.inCar.ry : state.camYaw;
+  ctx.save();
+  ctx.clearRect(0, 0, size, size);
+  ctx.beginPath();
+  ctx.arc(centre, centre, centre - 2, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.fillStyle = '#c9bda6';
+  ctx.fillRect(0, 0, size, size);
+  ctx.translate(centre, centre);
+  ctx.rotate(-heading);
+  ctx.translate(-p.x * scale, -p.z * scale);
+  // Water east of the shore line.
+  ctx.fillStyle = '#57b8ad';
+  ctx.fillRect((CITY_HALF + 24) * scale, -400, 800, 1400);
+  // Roads.
+  ctx.strokeStyle = '#5a5a63';
+  ctx.lineWidth = 13 * scale + 3;
+  for (let k = -3; k <= 3; k++) {
+    const c = k * 46 * scale;
+    ctx.beginPath(); ctx.moveTo(c, -400); ctx.lineTo(c, 900); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-400, c); ctx.lineTo(900, c); ctx.stroke();
   }
-  if (ui.ovFeat) {
-    ui.ovFeat.style.display = s.mode === 'title' ? 'block' : 'none';
-    if (s.mode === 'title') ui.ovFeat.textContent = '8 STORY MISSIONS · 5-STAR WANTED · HELICOPTER + ROADBLOCKS · 2 RADIO STATIONS · 4 WEAPONS · RESPECT RANKS · GARAGE UPGRADES';
-  }
-  if (ui.ovSave) {
-    ui.ovSave.style.display = s.mode === 'title' ? 'block' : 'none';
-    if (s.mode === 'title') {
-      const ownedCount = WEAPON_ORDER.filter((w) => ownsWeapon(s, w)).length;
-      ui.ovSave.textContent = s.missionIdx > 0
-        ? 'CONTINUE — MISSIONS ' + s.missionIdx + '/8 · $' + s.cash + ' · RESPECT ' + rankName(s.respect || 0) + ' · ' + ownedCount + ' WEAPON' + (ownedCount === 1 ? '' : 'S')
-        : 'NEW GAME — 8 MISSIONS AHEAD';
-    }
-  }
-  const overlay = OVERLAY_TEXT[s.mode];
-  if (overlay) {
-    ui.overlay.style.display = 'flex';
-    ui.ovTitle.textContent = overlay[0];
-    ui.ovTitle.style.color = s.mode === 'busted' ? '#6ab0ff' : s.mode === 'wasted' ? '#ff5252' : '#ff8c42';
-    ui.ovSub.textContent = s.mode === 'busted' ? 'Fine paid: $' + (s.fine || 0) + ' · Click to continue'
-      : s.mode === 'wasted' ? 'Hospital bill $150 · Click to continue' : overlay[1];
-  } else ui.overlay.style.display = 'none';
+  const dot = (x, z, r, color) => {
+    ctx.beginPath();
+    ctx.arc(x * scale, z * scale, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+  };
+  const objective = (state.mission && state.mission.target) || (state.taxi && state.taxi.target);
+  if (objective) dot(objective.x, objective.z, 4.5, '#ffd23e');
+  for (const cop of state.cops) dot(cop.x, cop.z, 3, cop.roadblock ? '#ff7b2e' : '#e33f4e');
+  if (state.heli) dot(state.heli.x, state.heli.z, 3.5, '#ffffff');
+  for (const pk of state.pickups) dot(pk.x, pk.z, 3, '#37e08a');
+  ctx.restore();
+  // Player arrow, fixed pointing up.
+  ctx.save();
+  ctx.translate(centre, centre);
+  ctx.beginPath();
+  ctx.moveTo(0, -8); ctx.lineTo(5.5, 7); ctx.lineTo(0, 3.4); ctx.lineTo(-5.5, 7);
+  ctx.closePath();
+  ctx.fillStyle = '#ff8c3a';
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.stroke();
+  ctx.restore();
 }

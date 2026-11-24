@@ -1,66 +1,78 @@
-// mesh.js — the source of all vertex data. Every vertex in the game
-// uses one interleaved layout, eleven floats per vertex:
-//   position xyz | normal xyz | uv | colour rgb
-// unitCubeData emits a single tinted cube centred on the origin, which
-// dynamic props scale and position at draw time. Builder gathers static
-// scenery into one large buffer per material batch, so the whole city
-// costs only a handful of draw calls.
+// mesh.js — a tiny geometry accumulator. The static city is baked once
+// into a handful of big meshes (one per facade texture, one for roads,
+// one for everything untextured) instead of thousands of draw calls.
+// Boxes are centred on (x, z) with their base sitting at y; quads are
+// arbitrary ground planes given as four corners. Every vertex carries a
+// position, a normal, a tint colour and a uv pair, matching the scene
+// shader's attribute layout.
 
 const FACE_TABLE = [
-  [[0, 0, 1], [[-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5]]],
-  [[0, 0, -1], [[0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, 0.5, -0.5], [0.5, 0.5, -0.5]]],
-  [[1, 0, 0], [[0.5, -0.5, 0.5], [0.5, -0.5, -0.5], [0.5, 0.5, -0.5], [0.5, 0.5, 0.5]]],
-  [[-1, 0, 0], [[-0.5, -0.5, -0.5], [-0.5, -0.5, 0.5], [-0.5, 0.5, 0.5], [-0.5, 0.5, -0.5]]],
-  [[0, 1, 0], [[-0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, -0.5], [-0.5, 0.5, -0.5]]],
-  [[0, -1, 0], [[-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, -0.5, 0.5], [-0.5, -0.5, 0.5]]],
+  // [normal, [corner offsets as (sx, sy, sz) in unit-box space]]
+  { n: [0, 0, 1], c: [[-1, 0, 1], [1, 0, 1], [1, 1, 1], [-1, 1, 1]] },   // front
+  { n: [0, 0, -1], c: [[1, 0, -1], [-1, 0, -1], [-1, 1, -1], [1, 1, -1]] }, // back
+  { n: [1, 0, 0], c: [[1, 0, 1], [1, 0, -1], [1, 1, -1], [1, 1, 1]] },   // right
+  { n: [-1, 0, 0], c: [[-1, 0, -1], [-1, 0, 1], [-1, 1, 1], [-1, 1, -1]] }, // left
+  { n: [0, 1, 0], c: [[-1, 1, 1], [1, 1, 1], [1, 1, -1], [-1, 1, -1]] },  // top
+  { n: [0, -1, 0], c: [[-1, 0, -1], [1, 0, -1], [1, 0, 1], [-1, 0, 1]] }, // bottom
 ];
-const QUAD_UV = [[0, 0], [1, 0], [1, 1], [0, 1]];
-const TRI_ORDER = [0, 1, 2, 0, 2, 3];
-
-export function unitCubeData(color) {
-  const rgb = color || [1, 1, 1];
-  const verts = [];
-  for (const [nrm, quad] of FACE_TABLE) {
-    for (const k of TRI_ORDER) {
-      verts.push(quad[k][0], quad[k][1], quad[k][2]);
-      verts.push(nrm[0], nrm[1], nrm[2]);
-      verts.push(QUAD_UV[k][0], QUAD_UV[k][1]);
-      verts.push(rgb[0], rgb[1], rgb[2]);
-    }
-  }
-  return new Float32Array(verts);
-}
 
 export class Builder {
-  constructor() { this.data = []; }
+  constructor() {
+    this.pos = [];
+    this.nor = [];
+    this.tint = [];
+    this.uv = [];
+    this.count = 0;
+  }
 
-  // Append one quad as two triangles. uvScale controls how many times
-  // the texture repeats across the face.
-  quad(p1, p2, p3, p4, normal, color, uvScale) {
-    const rep = uvScale === undefined ? 1 : uvScale;
-    const pts = [p1, p2, p3, p4];
-    const uvs = [[0, 0], [rep, 0], [rep, rep], [0, rep]];
-    for (const k of TRI_ORDER) {
-      const p = pts[k];
-      this.data.push(p[0], p[1], p[2], normal[0], normal[1], normal[2],
-        uvs[k][0], uvs[k][1], color[0], color[1], color[2]);
+  _pushVert(x, y, z, n, color, u, v) {
+    this.pos.push(x, y, z);
+    this.nor.push(n[0], n[1], n[2]);
+    this.tint.push(color[0], color[1], color[2]);
+    this.uv.push(u, v);
+    this.count++;
+  }
+
+  // One box. The `rows` argument stretches the facade texture vertically
+  // so tall towers get more window rows instead of stretched windows;
+  // it only affects the four side faces.
+  box(x, y, z, w, h, d, color, rows = 1) {
+    const hw = w / 2, hd = d / 2;
+    for (const face of FACE_TABLE) {
+      const isSide = face.n[1] === 0;
+      const vTop = isSide ? rows : 1;
+      const quadUvs = [[0, 0], [1, 0], [1, vTop], [0, vTop]];
+      const idx = [0, 1, 2, 0, 2, 3];
+      const corners = face.c;
+      for (const i of idx) {
+        const c = corners[i];
+        this._pushVert(
+          x + c[0] * hw, y + c[1] * h, z + c[2] * hd,
+          face.n, color, quadUvs[i][0], quadUvs[i][1],
+        );
+      }
     }
   }
 
-  // Axis-aligned box given its footprint; cy is the ground level the box
-  // sits on, matching how the scenery code prefers to place things.
-  box(cx, cy, cz, w, h, d, color, uvRepeat) {
-    const rep = uvRepeat || 0;
-    const xa = cx - w / 2, xb = cx + w / 2;
-    const ya = cy, yb = cy + h;
-    const za = cz - d / 2, zb = cz + d / 2;
-    this.quad([xa, ya, zb], [xb, ya, zb], [xb, yb, zb], [xa, yb, zb], [0, 0, 1], color, rep);
-    this.quad([xb, ya, za], [xa, ya, za], [xa, yb, za], [xb, yb, za], [0, 0, -1], color, rep);
-    this.quad([xb, ya, zb], [xb, ya, za], [xb, yb, za], [xb, yb, zb], [1, 0, 0], color, rep);
-    this.quad([xa, ya, za], [xa, ya, zb], [xa, yb, zb], [xa, yb, za], [-1, 0, 0], color, rep);
-    this.quad([xa, yb, zb], [xb, yb, zb], [xb, yb, za], [xa, yb, za], [0, 1, 0], color, 0);
-    this.quad([xa, ya, za], [xb, ya, za], [xb, ya, zb], [xa, ya, zb], [0, -1, 0], color, 0);
+  // A flat quad from four corners (used for road and water planes),
+  // with uv scaled so the texture tiles every `tile` world units.
+  quad(p1, p2, p3, p4, normal, color, tile = 1) {
+    const pts = [p1, p2, p3, p4];
+    const uvs = [[0, 0], [tile, 0], [tile, tile], [0, tile]];
+    const idx = [0, 1, 2, 0, 2, 3];
+    for (const i of idx) {
+      const p = pts[i];
+      this._pushVert(p[0], p[1], p[2], normal, color, uvs[i][0], uvs[i][1]);
+    }
   }
 
-  build(renderer) { return renderer.makeMesh(new Float32Array(this.data)); }
+  build(renderer) {
+    return renderer.createMesh({
+      positions: new Float32Array(this.pos),
+      normals: new Float32Array(this.nor),
+      colors: new Float32Array(this.tint),
+      uvs: new Float32Array(this.uv),
+      count: this.count,
+    });
+  }
 }

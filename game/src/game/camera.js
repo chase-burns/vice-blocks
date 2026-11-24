@@ -1,85 +1,61 @@
-// camera.js — two first-person camera rigs, pure math. The cockpit rig
-// sits at the driver's eye, inherits chassis pitch and roll through soft
-// springs, widens its FOV under acceleration, leans a little against the
-// steering at speed, and shakes with an amplitude proportional to trauma
-// squared. The foot rig is a bobbing eye at 1.72 m with recoil kick.
+// camera.js — the two first-person cameras. The cockpit camera sits
+// at the driver's head position in car space (left-hand drive: offset
+// to the car's left), looks down the bonnet, widens its field of view
+// with speed, and shakes in proportion to state.trauma. The foot
+// camera is a plain eye-level view at the player's head.
+
 import { clamp } from '../rng.js';
 
 export function viewDir(yaw, pitch) {
   const cp = Math.cos(pitch);
-  return [Math.sin(yaw) * cp, -Math.sin(pitch), Math.cos(yaw) * cp];
+  return [Math.sin(yaw) * cp, Math.sin(pitch), Math.cos(yaw) * cp];
 }
-
-function jitter(t, seed) {
-  return Math.sin(t * 31.7 + seed) * 0.6 + Math.sin(t * 57.3 + seed * 2.1) * 0.4;
-}
-
-const STANDARD_FOV = 75 * Math.PI / 180;
 
 export class CameraRig {
   constructor() {
-    this.eye = null; this.center = null;
-    this._pitchPos = 0; this._pitchVel = 0;
-    this._rollPos = 0; this._rollVel = 0;
-    this.fovPunch = 0;
-  }
-
-  _spring(pos, vel, target, dt) {
-    const accel = 18 * (target - pos) - 2.4 * vel * 6;
-    vel += accel * dt;
-    pos += vel * dt;
-    return [pos, vel];
+    // When set (shot mode), the cockpit FOV is pinned to this value.
+    this.fovPunch = null;
   }
 
   cockpit(s, car, lookYaw, lookPitch, t, dt) {
+    void dt;
     const fx = Math.sin(car.ry), fz = Math.cos(car.ry);
     const rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
-    const eyeAt = [car.x - rx * 0.35 + fx * 0.15, 1.22, car.z - rz * 0.35 + fz * 0.15];
-    const phys = car.phys;
-    const pitchNext = this._spring(this._pitchPos, this._pitchVel, phys ? phys.pitch : 0, dt);
-    this._pitchPos = pitchNext[0]; this._pitchVel = pitchNext[1];
-    const rollNext = this._spring(this._rollPos, this._rollVel, phys ? phys.roll : 0, dt);
-    this._rollPos = rollNext[0]; this._rollVel = rollNext[1];
-    const surge = phys ? phys.aLong : 0;
-    const fovTarget = STANDARD_FOV + clamp(surge * 0.35, -5, 12) * Math.PI / 180;
-    if (!this.fovPunch) this.fovPunch = fovTarget;
-    this.fovPunch += (fovTarget - this.fovPunch) * Math.min(1, dt * 6);
-    this.fovPunch = clamp(this.fovPunch, 0.9, 2.2);
-    const yaw = car.ry + lookYaw;
-    const pitch = lookPitch + this._pitchPos * 0.7;
-    const dir = viewDir(yaw, pitch);
-    eyeAt[1] += s.roadJolt || 0;
     const trauma = s.trauma || 0;
-    if (trauma > 0.01) {
-      const amp = trauma * trauma * 0.14;
-      eyeAt[0] += jitter(t, 1.3) * amp;
-      eyeAt[1] += jitter(t, 4.1) * amp * 0.7;
-      eyeAt[2] += jitter(t, 7.7) * amp;
-    }
-    const targetAt = [eyeAt[0] + dir[0] * 10, eyeAt[1] + dir[1] * 10, eyeAt[2] + dir[2] * 10];
-    const speedShare = clamp(Math.abs(car.speed) / 20, 0, 1);
-    const steerLean = clamp(-(car.steerAngle || 0) * speedShare * 0.3, -0.05, 0.05);
-    const combinedRoll = this._rollPos * 0.8 + steerLean;
-    const upVec = [-Math.cos(yaw) * combinedRoll, 1, Math.sin(yaw) * combinedRoll];
-    return { eye: eyeAt, center: targetAt, up: upVec, fov: this.fovPunch, yaw, pitch };
+    const shakeY = Math.sin(t * 39) * 0.02 * trauma;
+    const shakeR = Math.sin(t * 27 + 1) * 0.012 * trauma;
+    // Driver's head: 0.30 ahead of the car origin, 0.30 to the left,
+    // 1.15 up. These offsets are what put the wheel, cluster and
+    // mirror in their contract positions.
+    const eye = [
+      car.x + fx * 0.30 + rx * (-0.30 + shakeR),
+      1.15 + (s.roadJolt || 0) + shakeY,
+      car.z + fz * 0.30 + rz * (-0.30 + shakeR),
+    ];
+    const yaw = car.ry + lookYaw + Math.sin(t * 31) * 0.006 * trauma;
+    const pitch = lookPitch + Math.sin(t * 47) * 0.008 * trauma + (car.phys ? car.phys.pitch * 0.35 : 0);
+    const dir = viewDir(yaw, pitch);
+    const speedFrac = clamp(Math.abs(car.speed || 0) / 38.5, 0, 1);
+    const fov = this.fovPunch != null ? this.fovPunch : (66 + speedFrac * 12) * Math.PI / 180;
+    return {
+      eye,
+      center: [eye[0] + dir[0] * 10, eye[1] + dir[1] * 10, eye[2] + dir[2] * 10],
+      up: [0, 1, 0],
+      fov, yaw, pitch,
+    };
   }
 
-  foot(s, lookYaw, lookPitch, t) {
+  foot(s, camYaw, pitch, t) {
+    void t;
     const p = s.player;
-    const moving = p.speed > 0.2;
-    const bobY = moving ? Math.sin(p.bobPhase * 2) * 0.045 : 0;
-    const swayX = moving ? Math.cos(p.bobPhase) * 0.03 : 0;
-    const rx = Math.cos(lookYaw), rz = -Math.sin(lookYaw);
-    const eyeAt = [p.x + rx * swayX, 1.72 + bobY, p.z + rz * swayX];
-    const kick = (s.recoil || 0) * 0.03;
-    const dir = viewDir(lookYaw, lookPitch - kick);
-    const trauma = s.trauma || 0;
-    if (trauma > 0.01) {
-      const amp = trauma * trauma * 0.1;
-      eyeAt[0] += jitter(t, 2.2) * amp;
-      eyeAt[1] += jitter(t, 5.5) * amp;
-    }
-    const targetAt = [eyeAt[0] + dir[0] * 10, eyeAt[1] + dir[1] * 10, eyeAt[2] + dir[2] * 10];
-    return { eye: eyeAt, center: targetAt, up: [0, 1, 0], fov: STANDARD_FOV, yaw: lookYaw, pitch: lookPitch };
+    const eye = [p.x, 1.72, p.z];
+    const dir = viewDir(camYaw, pitch);
+    return {
+      eye,
+      center: [eye[0] + dir[0] * 10, eye[1] + dir[1] * 10, eye[2] + dir[2] * 10],
+      up: [0, 1, 0],
+      fov: 75 * Math.PI / 180,
+      yaw: camYaw, pitch,
+    };
   }
 }

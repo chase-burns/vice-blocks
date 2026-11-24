@@ -1,163 +1,224 @@
-// missions.js — an eight-mission story chain in strict order, plus
-// endless taxi work on the side. Finishing one job immediately starts
-// the next: a car theft, a timed courier run, a gun-store errand with
-// range targets, a harbour holdup, four-star survival, a five-checkpoint
-// race, a roadblock run, and a stealth courier whose clock bleeds while
-// you carry heat. Story missions pay cash and RESPECT; taxi fares
-// (press T while driving) pay cash only.
-import { dist2 } from '../rng.js';
-import { BLOCK, roadCenters } from './world.js';
+// missions.js — the eight-mission story chain plus endless taxi
+// work. A mission is a small state machine: a kind, an optional
+// countdown, a target point the HUD beam and minimap point at, and
+// phases for the two multi-beat jobs (the harbour holdup and the
+// finale). Finishing pays cash and RESPECT and persists the profile.
 
-export const MISSIONS = [
-  { name: 'THE SHORELINE GRAB', desc: 'Steal the magenta coupe on Ocean Drive and stash it at the alley marker.', pay: 500 },
-  { name: 'HEAT COURIER', desc: 'Hit 3 checkpoints downtown before the clock runs out.', pay: 750, time: 90 },
-  { name: 'AMMU-NATION RUN', desc: 'Buy the 9mm pistol ($300), then drop 5 range targets.', pay: 400 },
-  { name: 'THE RIVAL DEAL', desc: 'Hold up the rival boss at the harbor and take his briefcase.', pay: 2000 },
-  { name: 'VICE ESCAPE', desc: 'Survive the 4-star heat for 3 minutes, then reach the Pay \'n Spray.', pay: 1500 },
-  { name: 'PALM TREE GRAND PRIX', desc: 'Rico\'s midnight circuit on Solmar Bay: hit 5 checkpoints against the clock.', pay: 900, time: 80 },
-  { name: 'ROADBLOCK RUN', desc: 'Marisol\'s cargo has to cross town. Punch through the heat, hit the marks, reach the hideout.', pay: 1200 },
-  { name: 'NIGHT COURIER', desc: 'Uncle Bao\'s package, delivered quietly. Heat makes the clock bleed — stay invisible.', pay: 1100, time: 100 },
+import { dist2 } from '../rng.js';
+import { reportCrime } from './wanted.js';
+
+export const MISSION_DEFS = [
+  { name: 'FIRST WHEELS', kind: 'steal', reward: 250, respect: 40, text: 'FIRST WHEELS — Take the coupe parked by the beach' },
+  { name: 'COURIER RUN', kind: 'checkpoints', reward: 600, respect: 55, text: 'COURIER RUN — Hit every checkpoint before the clock dies', points: 4, time: 85 },
+  { name: 'RANGE DAY', kind: 'targets', reward: 500, respect: 50, text: 'RANGE DAY — Drop 5 range targets behind Ammu-Nation', count: 5 },
+  { name: 'HARBOR HEAT', kind: 'holdup', reward: 900, respect: 70, text: 'HARBOR HEAT — Shake down the rival crew at the harbour' },
+  { name: 'VICE ESCAPE', kind: 'survive', reward: 1500, respect: 90, text: "VICE ESCAPE — Survive the 4-star heat, then reach the Pay 'n Spray", time: 90 },
+  { name: 'PALM TREE GRAND PRIX', kind: 'checkpoints', reward: 2000, respect: 100, text: "PALM TREE GRAND PRIX — Rico's midnight circuit — hit 5 checkpoints against the clock", points: 5, time: 100 },
+  { name: 'ROADBLOCK RUN', kind: 'goto', reward: 2500, respect: 110, text: 'ROADBLOCK RUN — Punch through to the north beach drop' },
+  { name: 'THE RIVAL DEAL', kind: 'deal', reward: 20000, respect: 200, text: 'THE RIVAL DEAL — One last package, delivered quietly' },
 ];
 
-function randomCorner(s) {
-  const lines = roadCenters();
-  return { x: lines[s.rng.int(0, lines.length - 1)] + 9, z: lines[s.rng.int(0, lines.length - 1)] + 9, r: 6 };
-}
+const CHECKPOINT_POOL = [
+  { x: 92, z: -92 }, { x: -92, z: -46 }, { x: 46, z: 92 }, { x: -46, z: -92 },
+  { x: 138, z: 46 }, { x: -138, z: 46 }, { x: 92, z: 138 }, { x: -92, z: -138 },
+  { x: 0, z: 138 }, { x: 138, z: -92 },
+];
 
-function showBanner(s, text, seconds) { s.banner = text; s.bannerT = seconds === undefined ? 2 : seconds; }
-
-export function startMission(s) {
-  if (s.mission || s.missionIdx >= MISSIONS.length) return;
-  const def = MISSIONS[s.missionIdx];
-  const m = { ...def, idx: s.missionIdx, phase: 0, timer: def.time || 0, target: null, surviveT: 0 };
-  if (m.idx === 0) {
-    s.cars.push({ id: 555, kind: 'parked', x: BLOCK * 2.0, z: -BLOCK * 0.5 + 6.4, ry: 0, speed: 0, targetSpeed: 11, horiz: false, road: 0, dir: 1, color: [0.95, 0.15, 0.55], hp: 100, smoke: 0, driver: false, stopped: 0, missionCar: true });
-    m.target = { x: BLOCK * 2.0, z: -BLOCK * 0.5 + 6.4, r: 7 };
-  } else if (m.idx === 1 || m.idx === 5 || m.idx === 7) m.target = randomCorner(s);
-  else if (m.idx === 2) m.target = { ...s.city.zones.gunshop };
-  else if (m.idx === 3) { m.target = { ...s.city.zones.harbor }; s.boss = { x: s.city.zones.harbor.x + 3, z: s.city.zones.harbor.z + 2, aimTime: 0, done: false }; }
-  else if (m.idx === 4) { s.wantedAPI.add(s, 4, true); m.surviveT = 180; }
-  else if (m.idx === 6) { s.wantedAPI.add(s, 4, true); m.target = randomCorner(s); }
-  s.mission = m;
-  showBanner(s, m.name, 3.2);
-  s.events.push({ name: 'banner', data: m.name });
-}
-
-export function startTaxi(s) {
-  if (s.mission || s.taxi || !s.player.inCar) return;
-  s.taxi = { phase: 0, target: randomCorner(s), timer: 75, pay: 100 + s.rng.int(0, 90) };
-  showBanner(s, 'TAXI — PICK UP', 2);
-}
-
-function completeJob(s, pay, label) {
-  s.cash += pay; s.stats.earned += pay;
-  if (s.mission) { s.respect += 100; s.events.push({ name: 'respect', data: s.respect }); }
-  s.events.push({ name: 'cash', data: pay });
-  s.events.push({ name: 'missionDone', data: label || (s.mission && s.mission.name) || 'TAXI' });
-  showBanner(s, pay > 0 ? 'MISSION PASSED  +$' + pay : 'MISSION PASSED', 3.2);
-  if (s.mission) { s.mission = null; s.missionIdx++; s.events.push({ name: 'save' }); startMission(s); }
-  if (s.taxi) s.taxi = null;
-}
-
-function failCurrentJob(s, reason) {
-  s.events.push({ name: 'missionFail', data: reason });
-  showBanner(s, 'MISSION FAILED', 2.6);
-  const retryIdx = s.mission ? s.mission.idx : null;
-  s.mission = null; s.taxi = null;
-  if (retryIdx != null) { s.missionIdx = retryIdx; startMission(s); }
-}
-
-function runShorelineGrab(s, m, atTarget) {
-  const p = s.player;
-  if (m.phase === 0 && p.inCar && p.inCar.id === 555) { m.phase = 1; m.target = { x: -BLOCK * 1.5, z: BLOCK * 1.0, r: 6 }; showBanner(s, 'STASH IT IN THE ALLEY'); }
-  else if (m.phase === 1 && atTarget && p.inCar) completeJob(s, m.pay);
-  else if (m.phase === 0 && atTarget && !p.inCar) { s.msg = 'STEAL THE MAGENTA COUPE'; s.msgT = 0.6; }
-}
-
-function runCheckpoints(s, m, atTarget, total, labelFn) {
-  if (!atTarget) return;
-  m.phase++;
-  if (m.phase >= total) { completeJob(s, m.pay); return; }
-  m.target = randomCorner(s);
-  showBanner(s, labelFn(m.phase), 1.6);
-  s.events.push({ name: 'pickup' });
-}
-
-function runGunShop(s, m) {
-  if (m.phase === 0 && s.hasGun) {
-    m.phase = 1; s.targets = [];
-    for (let i = 0; i < 5; i++) s.targets.push({ x: s.city.zones.gunshop.x + 6 + i * 2.2, z: s.city.zones.gunshop.z - 8, down: false });
-    showBanner(s, 'DROP 5 TARGETS'); m.target = null;
-  } else if (m.phase === 1) {
-    const downCount = (s.targets || []).filter((t) => t.down).length;
-    if (downCount >= 5) { s.targets = []; completeJob(s, m.pay); }
+export function startMission(state) {
+  if (state.mission || state.taxi || state.missionIdx >= MISSION_DEFS.length) return false;
+  const def = MISSION_DEFS[state.missionIdx];
+  const m = {
+    idx: state.missionIdx, name: def.name, text: def.text, kind: def.kind,
+    reward: def.reward, respect: def.respect,
+    timer: def.time || null, target: null, phase: 'main', count: 0,
+  };
+  if (def.kind === 'steal') {
+    // The coupe: a parked sport car on the beach road.
+    const car = state.missionCar;
+    if (car) m.target = { x: car.x, z: car.z };
+  } else if (def.kind === 'checkpoints') {
+    m.points = CHECKPOINT_POOL.slice(state.missionIdx * 2, state.missionIdx * 2 + def.points);
+    m.target = m.points[0];
+  } else if (def.kind === 'targets') {
+    const z = state.city.zones.gunshop;
+    state.targets = [];
+    for (let i = 0; i < def.count; i++) {
+      state.targets.push({ x: z.x - 14 + i * 6, z: z.z - 16, hp: 20, down: false });
+    }
+    m.target = { x: z.x - 8, z: z.z - 16 };
+  } else if (def.kind === 'holdup') {
+    const hz = state.city.zones.harbor;
+    m.target = { x: hz.x, z: hz.z };
+    state.boss = { x: hz.x + 4, z: hz.z + 3, hp: 70, done: false };
+  } else if (def.kind === 'survive') {
+    reportCrime(state, 4.2);
+    m.target = null;
+  } else if (def.kind === 'goto') {
+    reportCrime(state, 4.0);
+    m.target = { x: 138, z: -138 };
+  } else if (def.kind === 'deal') {
+    const hz = state.city.zones.harbor;
+    m.target = { x: hz.x, z: hz.z };
   }
+  state.mission = m;
+  state.msg = def.name;
+  state.msgT = 2.4;
+  return true;
 }
 
-function runRivalDeal(s, m, dt) {
-  void m;
-  const p = s.player, boss = s.boss;
-  if (boss && !boss.done) {
-    const aiming = p.aim && s.hasGun && !p.inCar && dist2(p.x, p.z, boss.x, boss.z) < 7 * 7;
-    if (aiming) {
-      boss.aimTime += dt;
-      if (boss.aimTime >= 2) {
-        boss.done = true;
-        s.pickups.push({ x: boss.x, z: boss.z, cash: 2000, t: 60 });
-        s.wantedAPI.add(s, 3, true);
-        showBanner(s, 'GRAB THE BRIEFCASE');
-        s.events.push({ name: 'scoreGrab' });
-      }
-    } else boss.aimTime = Math.max(0, boss.aimTime - dt);
+export function startTaxi(state) {
+  if (state.taxi || state.mission) return false;
+  const rng = state.rng;
+  const px = rng.range(-130, 130), pz = rng.range(-130, 130);
+  state.taxi = {
+    phase: 'pickup',
+    target: { x: px, z: pz },
+    timer: null, fare: 0,
+  };
+  state.msg = 'TAXI — PICK UP THE FARE';
+  state.msgT = 2;
+  return true;
+}
+
+function finishMission(state) {
+  const m = state.mission;
+  state.cash += m.reward;
+  state.respect += m.respect;
+  state.missionIdx++;
+  state.mission = null;
+  state.banner = 'MISSION PASSED';
+  state.bannerT = 2.6;
+  state.events.push({ name: 'missionDone', data: m.reward });
+  state.events.push({ name: 'save', data: 0 });
+}
+
+function failMission(state) {
+  state.mission = null;
+  state.banner = 'MISSION FAILED';
+  state.bannerT = 2.2;
+  state.events.push({ name: 'missionFail', data: 0 });
+}
+
+export function stepMissions(state, dt) {
+  const p = state.player;
+  const px = p.inCar ? p.inCar.x : p.x;
+  const pz = p.inCar ? p.inCar.z : p.z;
+
+  // Loose cash pickups (robbery wallets, the holdup drop).
+  for (let i = state.pickups.length - 1; i >= 0; i--) {
+    const pk = state.pickups[i];
+    const reach = p.inCar ? 3.6 : 2.1;
+    if (dist2(pk.x, pk.z, px, pz) < reach * reach) {
+      state.pickups.splice(i, 1);
+      state.cash += pk.amount;
+      state.events.push({ name: 'pickup', data: pk.amount });
+      if (pk.missionTag && state.mission && state.mission.kind === 'holdup') finishMission(state);
+    }
   }
-  if (boss && boss.done && !s.pickups.some((pk) => pk.cash === 2000)) completeJob(s, 0);
-}
 
-function runViceEscape(s, m, dt) {
-  const p = s.player;
-  if (s.wanted > 0) m.surviveT -= dt;
-  if (m.surviveT <= 0 && !m.target) { m.target = { ...s.city.zones.spray }; showBanner(s, 'NOW LOSE THEM AT THE PAY \'N SPRAY', 2.4); }
-  if (m.target && s.wanted === 0 && dist2(p.x, p.z, m.target.x, m.target.z) < m.target.r * m.target.r + 40) completeJob(s, m.pay);
-}
-
-function runRoadblockRun(s, m, atTarget) {
-  if (!atTarget || !s.player.inCar) return;
-  m.phase++;
-  if (m.phase === 1) { m.target = randomCorner(s); showBanner(s, 'ONE MORE MARK — STAY AHEAD OF THEM'); s.events.push({ name: 'pickup' }); }
-  else if (m.phase === 2) { m.target = { ...s.city.zones.harbor }; showBanner(s, 'NOW THE HIDEOUT AT THE HARBOR'); }
-  else completeJob(s, m.pay);
-}
-
-function runNightCourier(s, m, atTarget, dt) {
-  if (s.wanted >= 2) { m.timer -= dt; s.msg = 'TOO HOT — THE CLOCK IS BLEEDING'; s.msgT = 0.4; }
-  if (atTarget && s.player.inCar) completeJob(s, m.pay);
-}
-
-export function stepMissions(s, dt) {
-  const p = s.player, m = s.mission;
+  const m = state.mission;
   if (m) {
-    if (m.timer > 0) { m.timer -= dt; if (m.timer <= 0) { failCurrentJob(s, 'Out of time'); return; } }
-    const reached = !!m.target && dist2(p.x, p.z, m.target.x, m.target.z) < m.target.r * m.target.r;
-    switch (m.idx) {
-      case 0: runShorelineGrab(s, m, reached); break;
-      case 1: runCheckpoints(s, m, reached, 3, (n) => 'CHECKPOINT ' + (n + 1) + ' / 3'); break;
-      case 2: runGunShop(s, m); break;
-      case 3: runRivalDeal(s, m, dt); break;
-      case 4: runViceEscape(s, m, dt); if (s.mode !== 'play') return; break;
-      case 5: if (reached && p.inCar) runCheckpoints(s, m, true, 5, (n) => 'CHECKPOINT ' + (n + 1) + ' / 5'); break;
-      case 6: runRoadblockRun(s, m, reached); break;
-      case 7: runNightCourier(s, m, reached, dt); break;
+    if (m.timer != null && m.kind !== 'survive') {
+      m.timer -= dt;
+      if (m.timer <= 0) { failMission(state); return; }
+    }
+    switch (m.kind) {
+      case 'steal': {
+        if (state.missionCar) m.target = { x: state.missionCar.x, z: state.missionCar.z };
+        if (p.inCar && p.inCar === state.missionCar) finishMission(state);
+        break;
+      }
+      case 'checkpoints': {
+        if (m.target && dist2(m.target.x, m.target.z, px, pz) < 8 * 8) {
+          m.count++;
+          state.events.push({ name: 'cash', data: 0 });
+          if (m.count >= m.points.length) finishMission(state);
+          else { m.target = m.points[m.count]; m.timer += 10; }
+        }
+        break;
+      }
+      case 'targets': {
+        if (state.targets.length && state.targets.every((t) => t.down)) finishMission(state);
+        break;
+      }
+      case 'holdup': {
+        if (state.boss && state.boss.done && !m.dropped) {
+          m.dropped = true;
+          state.pickups.push({ x: state.boss.x, z: state.boss.z, amount: m.reward, missionTag: true });
+          m.target = { x: state.boss.x, z: state.boss.z };
+          state.msg = 'GRAB THE CASH';
+          state.msgT = 2;
+        }
+        break;
+      }
+      case 'survive': {
+        if (m.phase === 'main') {
+          m.timer -= dt;
+          if (state.stars < 4) reportCrime(state, 0.6); // the heat stays on
+          if (m.timer <= 0) {
+            m.phase = 'escape';
+            const z = state.city.zones.spray;
+            m.target = { x: z.x, z: z.z };
+            state.msg = "NOW — THE PAY 'N SPRAY";
+            state.msgT = 2.4;
+          }
+        } else if (m.target && dist2(m.target.x, m.target.z, px, pz) < 7 * 7) {
+          state.heat = 0; state.stars = 0; state.cops = []; state.heli = null;
+          finishMission(state);
+        }
+        break;
+      }
+      case 'goto': {
+        if (m.target && dist2(m.target.x, m.target.z, px, pz) < 9 * 9) finishMission(state);
+        break;
+      }
+      case 'deal': {
+        if (m.phase === 'main' && m.target && dist2(m.target.x, m.target.z, px, pz) < 8 * 8) {
+          m.phase = 'fight';
+          const hz = state.city.zones.harbor;
+          state.targets = [0, 1, 2].map((i) => ({ x: hz.x - 8 + i * 7, z: hz.z + 10, hp: 30, down: false }));
+          m.target = { x: hz.x, z: hz.z + 10 };
+          state.msg = 'THE CREW WAS WAITING — DROP THEM';
+          state.msgT = 2.4;
+        } else if (m.phase === 'fight' && state.targets.every((t) => t.down)) {
+          m.phase = 'deliver';
+          const z = state.city.zones.contact;
+          m.target = { x: z.x, z: z.z };
+          state.msg = 'DELIVER THE PACKAGE';
+          state.msgT = 2.4;
+        } else if (m.phase === 'deliver' && m.target && dist2(m.target.x, m.target.z, px, pz) < 8 * 8) {
+          finishMission(state);
+        }
+        break;
+      }
       default: break;
     }
   }
-  const fare = s.taxi;
-  if (fare) {
-    fare.timer -= dt;
-    if (fare.timer <= 0) { s.taxi = null; showBanner(s, 'FARE LOST'); return; }
-    const atFare = fare.target && dist2(p.x, p.z, fare.target.x, fare.target.z) < fare.target.r * fare.target.r;
-    if (atFare) {
-      if (fare.phase === 0) { fare.phase = 1; fare.target = randomCorner(s); fare.timer = Math.max(fare.timer, 60); showBanner(s, 'DROP THEM OFF'); s.events.push({ name: 'pickup' }); }
-      else completeJob(s, fare.pay, 'TAXI');
+
+  const taxi = state.taxi;
+  if (taxi) {
+    if (taxi.phase === 'pickup' && dist2(taxi.target.x, taxi.target.z, px, pz) < 6 * 6) {
+      const rng = state.rng;
+      taxi.phase = 'dropoff';
+      taxi.target = { x: rng.range(-130, 130), z: rng.range(-130, 130) };
+      taxi.timer = 50 + Math.hypot(taxi.target.x - px, taxi.target.z - pz) * 0.55;
+      taxi.fare = Math.round(35 + Math.hypot(taxi.target.x - px, taxi.target.z - pz) * 0.5);
+      state.msg = 'TAXI — DROP THEM OFF';
+      state.msgT = 2;
+    } else if (taxi.phase === 'dropoff') {
+      taxi.timer -= dt;
+      if (taxi.timer <= 0) {
+        state.taxi = null;
+        state.msg = 'FARE LOST';
+        state.msgT = 2;
+      } else if (dist2(taxi.target.x, taxi.target.z, px, pz) < 6 * 6) {
+        state.cash += taxi.fare;
+        state.respect += 4;
+        state.events.push({ name: 'cash', data: taxi.fare });
+        state.msg = 'FARE PAID $' + taxi.fare;
+        state.msgT = 2;
+        state.taxi = null;
+      }
     }
   }
 }

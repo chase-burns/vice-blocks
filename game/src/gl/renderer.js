@@ -1,11 +1,12 @@
-// renderer.js — a compact WebGL1 renderer written from scratch. It owns
-// the linked shader program, the column-major matrix helpers, buffer
-// uploads, and the two draw primitives everything else is built from: a
-// tinted unit cube placed in the world, and a thin textured panel (the
-// gauge-cluster face, the spotlight pool lying on the road).
-import { VS, FS } from './shaders.js';
-import { makeTextures } from './textures.js';
-import { unitCubeData } from './mesh.js';
+// renderer.js — a small hand-rolled WebGL1 wrapper. It owns the two
+// shader programs, the procedural textures, a unit cube and a unit
+// quad, and exposes three drawing verbs: draw() for baked meshes,
+// box() for one transformed unit cube (the workhorse for cars, people
+// and props), and panel() for textured quads (the dash cluster, the
+// spotlight pool). Matrices are plain column-major Float32Arrays.
+
+import { SCENE_VERT, SCENE_FRAG, SKY_VERT, SKY_FRAG } from './shaders.js';
+import { createTextures } from './textures.js';
 
 export function mat4Identity() {
   return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
@@ -13,198 +14,276 @@ export function mat4Identity() {
 
 export function mat4Perspective(fov, aspect, near, far) {
   const f = 1 / Math.tan(fov / 2);
-  const invRange = 1 / (near - far);
-  const m = new Float32Array(16);
-  m[0] = f / aspect; m[5] = f;
-  m[10] = (far + near) * invRange; m[11] = -1;
-  m[14] = 2 * far * near * invRange;
-  return m;
+  const nf = 1 / (near - far);
+  return new Float32Array([
+    f / aspect, 0, 0, 0,
+    0, f, 0, 0,
+    0, 0, (far + near) * nf, -1,
+    0, 0, 2 * far * near * nf, 0,
+  ]);
 }
 
 export function mat4LookAt(eye, center, up) {
-  const ex = eye[0], ey = eye[1], ez = eye[2];
-  let backX = ex - center[0], backY = ey - center[1], backZ = ez - center[2];
-  let n = Math.hypot(backX, backY, backZ) || 1;
-  backX /= n; backY /= n; backZ /= n;
-  let sideX = up[1] * backZ - up[2] * backY;
-  let sideY = up[2] * backX - up[0] * backZ;
-  let sideZ = up[0] * backY - up[1] * backX;
-  n = Math.hypot(sideX, sideY, sideZ) || 1;
-  sideX /= n; sideY /= n; sideZ /= n;
-  const trueUpX = backY * sideZ - backZ * sideY;
-  const trueUpY = backZ * sideX - backX * sideZ;
-  const trueUpZ = backX * sideY - backY * sideX;
+  let zx = eye[0] - center[0], zy = eye[1] - center[1], zz = eye[2] - center[2];
+  let len = Math.hypot(zx, zy, zz) || 1;
+  zx /= len; zy /= len; zz /= len;
+  let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+  len = Math.hypot(xx, xy, xz) || 1;
+  xx /= len; xy /= len; xz /= len;
+  const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
   return new Float32Array([
-    sideX, trueUpX, backX, 0, sideY, trueUpY, backY, 0, sideZ, trueUpZ, backZ, 0,
-    -(sideX * ex + sideY * ey + sideZ * ez),
-    -(trueUpX * ex + trueUpY * ey + trueUpZ * ez),
-    -(backX * ex + backY * ey + backZ * ez), 1,
+    xx, yx, zx, 0,
+    xy, yy, zy, 0,
+    xz, yz, zz, 0,
+    -(xx * eye[0] + xy * eye[1] + xz * eye[2]),
+    -(yx * eye[0] + yy * eye[1] + yz * eye[2]),
+    -(zx * eye[0] + zy * eye[1] + zz * eye[2]), 1,
   ]);
 }
 
 export function mat4Multiply(a, b) {
-  const result = new Float32Array(16);
-  for (let col = 0; col < 4; col++) for (let row = 0; row < 4; row++) {
-    let sum = 0;
-    for (let k = 0; k < 4; k++) sum += a[k * 4 + row] * b[col * 4 + k];
-    result[col * 4 + row] = sum;
+  const out = new Float32Array(16);
+  for (let col = 0; col < 4; col++) {
+    for (let row = 0; row < 4; row++) {
+      let sum = 0;
+      for (let k = 0; k < 4; k++) sum += a[k * 4 + row] * b[col * 4 + k];
+      out[col * 4 + row] = sum;
+    }
   }
-  return result;
+  return out;
 }
 
-// Model matrix for an upright object: position, yaw, scale.
-export function mat4Model(x, y, z, ry, sx, sy, sz) {
-  const cos = Math.cos(ry), sin = Math.sin(ry);
+// Compose T * Ry * Rx * Rz * S into one matrix for the box/panel verbs.
+function composeModel(x, y, z, ry, pitch, roll, scx, scy, scz) {
+  const cy = Math.cos(ry), syw = Math.sin(ry);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  // R = Ry * Rx * Rz, worked out entry by entry.
+  const r00 = cy * cr + syw * sp * sr, r01 = -cy * sr + syw * sp * cr, r02 = syw * cp;
+  const r10 = cp * sr, r11 = cp * cr, r12 = -sp;
+  const r20 = -syw * cr + cy * sp * sr, r21 = syw * sr + cy * sp * cr, r22 = cy * cp;
   return new Float32Array([
-    cos * sx, 0, -sin * sx, 0, 0, sy, 0, 0, sin * sz, 0, cos * sz, 0, x, y, z, 1,
+    r00 * scx, r10 * scx, r20 * scx, 0,
+    r01 * scy, r11 * scy, r21 * scy, 0,
+    r02 * scz, r12 * scz, r22 * scz, 0,
+    x, y, z, 1,
   ]);
 }
 
-// Posed model matrix — yaw, pitch, roll, scale — for anything that
-// leans: wheels, the helicopter, weapon viewmodels.
-export function mat4ModelPose(x, y, z, ry, pitch, roll, sx, sy, sz) {
-  const cosYaw = Math.cos(ry), sinYaw = Math.sin(ry);
-  const cp = Math.cos(pitch), sp = Math.sin(pitch);
-  const cr = Math.cos(roll), sr = Math.sin(roll);
-  const rot = [
-    cosYaw * cr + sinYaw * sp * sr, cp * sr, -sinYaw * cr + cosYaw * sp * sr, 0,
-    -cosYaw * sr + sinYaw * sp * cr, cp * cr, sinYaw * sr + cosYaw * sp * cr, 0,
-    sinYaw * cp, -sp, cosYaw * cp, 0, 0, 0, 0, 1,
-  ];
-  const scaleByAxis = [sx, sy, sz];
-  const m = new Float32Array(16);
-  for (let col = 0; col < 3; col++) for (let row = 0; row < 4; row++) {
-    m[col * 4 + row] = rot[col * 4 + row] * (row < 3 ? scaleByAxis[col] : 1);
-  }
-  m[12] = x; m[13] = y; m[14] = z; m[15] = 1;
-  return m;
+function compileProgram(gl, vertSrc, fragSrc) {
+  const mk = (type, src) => {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(sh));
+    }
+    return sh;
+  };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, mk(gl.VERTEX_SHADER, vertSrc));
+  gl.attachShader(prog, mk(gl.FRAGMENT_SHADER, fragSrc));
+  gl.linkProgram(prog);
+  return prog;
 }
 
-function buildShader(gl, kind, sourceText) {
-  const sh = gl.createShader(kind);
-  gl.shaderSource(sh, sourceText);
-  gl.compileShader(sh);
-  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error('shader: ' + gl.getShaderInfoLog(sh));
-  return sh;
+// Unit cube centred on the origin, 36 vertices, faces wound outward.
+function unitCubeData() {
+  const faces = [
+    { n: [0, 0, 1], c: [[-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5]] },
+    { n: [0, 0, -1], c: [[0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, 0.5, -0.5], [0.5, 0.5, -0.5]] },
+    { n: [1, 0, 0], c: [[0.5, -0.5, 0.5], [0.5, -0.5, -0.5], [0.5, 0.5, -0.5], [0.5, 0.5, 0.5]] },
+    { n: [-1, 0, 0], c: [[-0.5, -0.5, -0.5], [-0.5, -0.5, 0.5], [-0.5, 0.5, 0.5], [-0.5, 0.5, -0.5]] },
+    { n: [0, 1, 0], c: [[-0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, -0.5], [-0.5, 0.5, -0.5]] },
+    { n: [0, -1, 0], c: [[-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, -0.5, 0.5], [-0.5, -0.5, 0.5]] },
+  ];
+  const pos = [], nor = [], tint = [], uv = [];
+  const uvs = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  for (const f of faces) {
+    for (const i of [0, 1, 2, 0, 2, 3]) {
+      pos.push(...f.c[i]);
+      nor.push(...f.n);
+      tint.push(1, 1, 1);
+      uv.push(uvs[i][0], uvs[i][1]);
+    }
+  }
+  return { positions: new Float32Array(pos), normals: new Float32Array(nor), colors: new Float32Array(tint), uvs: new Float32Array(uv), count: 36 };
+}
+
+function unitQuadData() {
+  const corners = [[-0.5, -0.5, 0], [0.5, -0.5, 0], [0.5, 0.5, 0], [-0.5, 0.5, 0]];
+  const uvs = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  const pos = [], nor = [], tint = [], uv = [];
+  for (const i of [0, 1, 2, 0, 2, 3]) {
+    pos.push(...corners[i]);
+    nor.push(0, 0, 1);
+    tint.push(1, 1, 1);
+    uv.push(uvs[i][0], uvs[i][1]);
+  }
+  return { positions: new Float32Array(pos), normals: new Float32Array(nor), colors: new Float32Array(tint), uvs: new Float32Array(uv), count: 6 };
 }
 
 export class Renderer {
   constructor(canvas) {
+    this.canvas = canvas;
     const gl = canvas.getContext('webgl', { antialias: true });
     if (!gl) throw new Error('WebGL unavailable');
-    this.gl = gl; this.canvas = canvas;
-    const prog = gl.createProgram();
-    gl.attachShader(prog, buildShader(gl, gl.VERTEX_SHADER, VS));
-    gl.attachShader(prog, buildShader(gl, gl.FRAGMENT_SHADER, FS));
-    gl.linkProgram(prog); gl.useProgram(prog); this.prog = prog;
-    const uniformAt = (name) => gl.getUniformLocation(prog, name);
-    this.loc = {
-      pos: gl.getAttribLocation(prog, 'aPos'), norm: gl.getAttribLocation(prog, 'aNorm'),
-      uv: gl.getAttribLocation(prog, 'aUv'), col: gl.getAttribLocation(prog, 'aCol'),
-      mvp: uniformAt('uMvp'), model: uniformAt('uModel'), tex: uniformAt('uTex'), useTex: uniformAt('uUseTex'),
-      emissive: uniformAt('uEmissive'), sun: uniformAt('uSun'), fog: uniformAt('uFogColor'), horizon: uniformAt('uHorizon'),
-      zen: uniformAt('uZen'), mid: uniformAt('uMid'), amb: uniformAt('uAmb'), cam: uniformAt('uCam'), alpha: uniformAt('uAlpha'), sky: uniformAt('uSky'),
+    this.gl = gl;
+    this.prog = compileProgram(gl, SCENE_VERT, SCENE_FRAG);
+    this.skyProg = compileProgram(gl, SKY_VERT, SKY_FRAG);
+    this.loc = {};
+    for (const name of ['aPos', 'aNorm', 'aTint', 'aUv']) this.loc[name] = gl.getAttribLocation(this.prog, name);
+    for (const name of ['uModel', 'uView', 'uProj', 'uCamPos', 'uTex', 'uUseTex', 'uColor', 'uAlpha', 'uEmissive', 'uFogColor', 'uAmbScale']) {
+      this.loc[name] = gl.getUniformLocation(this.prog, name);
+    }
+    this.skyLoc = {
+      aClip: gl.getAttribLocation(this.skyProg, 'aClip'),
+      uZen: gl.getUniformLocation(this.skyProg, 'uZen'),
+      uMid: gl.getUniformLocation(this.skyProg, 'uMid'),
+      uHor: gl.getUniformLocation(this.skyProg, 'uHor'),
     };
-    gl.enable(gl.DEPTH_TEST);
-    gl.clearColor(0.99, 0.76, 0.56, 1.0);
-    this.fogColor = [0.99, 0.80, 0.62];
-    this.horizon = [1.0, 0.70, 0.47];
+    this.textures = createTextures(gl);
+    // Grade uniforms, overwritten by main before every begin().
     this.zen = [0.42, 0.66, 0.92];
     this.mid = [0.98, 0.78, 0.58];
+    this.horizon = [1.0, 0.70, 0.47];
+    this.fogColor = [0.99, 0.80, 0.62];
     this.ambScale = 1.0;
-    const rawSun = [0.8, 0.25, -0.5];
-    const sunNorm = Math.hypot(rawSun[0], rawSun[1], rawSun[2]);
-    this.sunDir = rawSun.map((v) => v / sunNorm);
-    this.textures = makeTextures(gl);
-    this._tintCache = new Map();
-    this._skyMesh = null; this._panelMesh = null;
-    console.log('Vice Blocks renderer up');
+    this.cube = this.createMesh(unitCubeData());
+    this.quad = this.createMesh(unitQuadData());
+    const skyBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, skyBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    this.skyBuf = skyBuf;
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+  }
+
+  createMesh(data) {
+    const gl = this.gl;
+    const mk = (arr) => {
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
+      return buf;
+    };
+    return { pos: mk(data.positions), nor: mk(data.normals), tint: mk(data.colors), uv: mk(data.uvs), count: data.count };
   }
 
   resize() {
-    const cv = this.canvas;
-    const ratio = Math.min(window.devicePixelRatio || 1, 2);
-    const w = Math.floor(cv.clientWidth * ratio), h = Math.floor(cv.clientHeight * ratio);
-    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; this.gl.viewport(0, 0, w, h); }
+    const w = this.canvas.clientWidth || innerWidth;
+    const h = this.canvas.clientHeight || innerHeight;
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+    }
+    this.gl.viewport(0, 0, w, h);
     return [w, h];
   }
 
-  makeMesh(data) {
-    const gl = this.gl;
-    const buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-    return { buf: buffer, count: data.length / 11 };
+  _bindMesh(mesh) {
+    const gl = this.gl, L = this.loc;
+    const bind = (buf, loc, size) => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+    };
+    bind(mesh.pos, L.aPos, 3);
+    bind(mesh.nor, L.aNorm, 3);
+    bind(mesh.tint, L.aTint, 3);
+    bind(mesh.uv, L.aUv, 2);
   }
 
-  bindMesh(mesh) {
-    const gl = this.gl, L = this.loc, STRIDE = 44;
-    gl.bindBuffer(gl.ARRAY_BUFFER, mesh.buf);
-    gl.enableVertexAttribArray(L.pos); gl.vertexAttribPointer(L.pos, 3, gl.FLOAT, false, STRIDE, 0);
-    gl.enableVertexAttribArray(L.norm); gl.vertexAttribPointer(L.norm, 3, gl.FLOAT, false, STRIDE, 12);
-    gl.enableVertexAttribArray(L.uv); gl.vertexAttribPointer(L.uv, 2, gl.FLOAT, false, STRIDE, 24);
-    gl.enableVertexAttribArray(L.col); gl.vertexAttribPointer(L.col, 3, gl.FLOAT, false, STRIDE, 32);
-  }
-
-  // Begin a frame: clear, upload the grade uniforms, then draw the sky
-  // cube centred on the camera with depth writes off so the world can
-  // paint over it.
-  begin(view, proj, camPos) {
+  begin(view, proj, eye) {
     const gl = this.gl;
+    gl.clearColor(this.fogColor[0], this.fogColor[1], this.fogColor[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    this.vp = mat4Multiply(proj, view);
-    gl.uniform3fv(this.loc.sun, this.sunDir);
-    gl.uniform3fv(this.loc.fog, this.fogColor);
-    gl.uniform3fv(this.loc.horizon, this.horizon);
-    gl.uniform3fv(this.loc.zen, this.zen);
-    gl.uniform3fv(this.loc.mid, this.mid);
-    gl.uniform1f(this.loc.amb, this.ambScale);
-    gl.uniform3fv(this.loc.cam, camPos);
-    gl.uniform1i(this.loc.tex, 0);
-    if (!this._skyMesh) this._skyMesh = this.makeMesh(unitCubeData([1, 1, 1]));
+    // Sky first, with depth writes off and the LEQUAL trick at z=0.9999.
+    gl.useProgram(this.skyProg);
     gl.depthMask(false);
-    this.draw(this._skyMesh, mat4Model(camPos[0], camPos[1], camPos[2], 0, 900, 900, 900), { sky: true });
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.skyBuf);
+    gl.enableVertexAttribArray(this.skyLoc.aClip);
+    gl.vertexAttribPointer(this.skyLoc.aClip, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform3fv(this.skyLoc.uZen, this.zen);
+    gl.uniform3fv(this.skyLoc.uMid, this.mid);
+    gl.uniform3fv(this.skyLoc.uHor, this.horizon);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.depthMask(true);
+    gl.useProgram(this.prog);
+    gl.uniformMatrix4fv(this.loc.uView, false, view);
+    gl.uniformMatrix4fv(this.loc.uProj, false, proj);
+    gl.uniform3fv(this.loc.uCamPos, eye);
+    gl.uniform3fv(this.loc.uFogColor, this.fogColor);
+    gl.uniform1f(this.loc.uAmbScale, this.ambScale);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(this.loc.uTex, 0);
+  }
+
+  _blendFor(opts) {
+    const gl = this.gl;
+    const alpha = opts.alpha != null ? opts.alpha : 1;
+    if (alpha < 1 || opts.add) {
+      gl.enable(gl.BLEND);
+      if (opts.add) gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+      else gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+    }
+    return alpha;
+  }
+
+  _blendOff() {
+    const gl = this.gl;
+    gl.disable(gl.BLEND);
     gl.depthMask(true);
   }
 
-  draw(mesh, model, opts) {
-    const o = opts || {}, gl = this.gl;
-    this.bindMesh(mesh);
-    gl.uniformMatrix4fv(this.loc.mvp, false, mat4Multiply(this.vp, model));
-    gl.uniformMatrix4fv(this.loc.model, false, model);
-    gl.uniform1f(this.loc.useTex, o.tex ? 1 : 0);
-    gl.uniform1f(this.loc.emissive, o.emissive ? 1 : 0);
-    gl.uniform1f(this.loc.sky, o.sky ? 1 : 0);
-    const alphaVal = o.alpha != null ? o.alpha : 1;
-    gl.uniform1f(this.loc.alpha, alphaVal);
-    const blending = alphaVal < 1;
-    if (blending) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, o.add ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false); }
-    if (o.tex) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.textures[o.tex]); }
+  draw(mesh, model, opts = {}) {
+    const gl = this.gl, L = this.loc;
+    const alpha = this._blendFor(opts);
+    this._bindMesh(mesh);
+    gl.uniformMatrix4fv(L.uModel, false, model);
+    gl.uniform3fv(L.uColor, [1, 1, 1]);
+    gl.uniform1f(L.uAlpha, alpha);
+    gl.uniform1f(L.uEmissive, opts.emissive ? 1 : 0);
+    if (opts.tex) {
+      const tex = this.textures[opts.tex];
+      gl.bindTexture(gl.TEXTURE_2D, tex && tex.tex ? tex.tex : tex);
+      gl.uniform1f(L.uUseTex, 1);
+    } else {
+      gl.uniform1f(L.uUseTex, 0);
+    }
     gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
-    if (blending) { gl.depthMask(true); gl.disable(gl.BLEND); }
+    this._blendOff();
   }
 
-  // A unit cube in a single colour. The palette is small, so cube meshes
-  // are cached per colour rather than rebuilt for every object.
-  box(x, y, z, ry, w, h, d, color, opts) {
-    const o = opts || {};
-    const cacheKey = color.join(',');
-    let mesh = this._tintCache.get(cacheKey);
-    if (!mesh) { mesh = this.makeMesh(unitCubeData(color)); this._tintCache.set(cacheKey, mesh); }
-    const model = (o.pitch || o.roll)
-      ? mat4ModelPose(x, y, z, ry, o.pitch || 0, o.roll || 0, w, h, d)
-      : mat4Model(x, y, z, ry, w, h, d);
-    this.draw(mesh, model, o);
+  // One unit cube scaled to (w, h, d), centred at (x, y, z), yawed by
+  // ry with optional pitch/roll, in a flat colour.
+  box(x, y, z, ry, w, h, d, color, opts = {}) {
+    const gl = this.gl, L = this.loc;
+    const alpha = this._blendFor(opts);
+    this._bindMesh(this.cube);
+    gl.uniformMatrix4fv(L.uModel, false, composeModel(x, y, z, ry || 0, opts.pitch || 0, opts.roll || 0, w, h, d));
+    gl.uniform3fv(L.uColor, color);
+    gl.uniform1f(L.uAlpha, alpha);
+    gl.uniform1f(L.uEmissive, opts.emissive ? 1 : 0);
+    gl.uniform1f(L.uUseTex, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, this.cube.count);
+    this._blendOff();
   }
 
-  // The thin textured panel used for the dash gauge face and the
-  // spotlight pool.
-  panel(x, y, z, ry, w, h, texKey, opts) {
-    const o = opts || {};
-    if (!this._panelMesh) this._panelMesh = this.makeMesh(unitCubeData([1, 1, 1]));
-    const model = (o.pitch || o.roll)
-      ? mat4ModelPose(x, y, z, ry, o.pitch || 0, o.roll || 0, w, h, 0.03)
-      : mat4Model(x, y, z, ry, w, h, 0.03);
-    this.draw(this._panelMesh, model, { tex: texKey, emissive: true, alpha: o.alpha, add: o.add });
+  // One textured quad centred at (x, y, z), facing +z before yaw/pitch.
+  panel(x, y, z, ry, w, h, texName, opts = {}) {
+    const gl = this.gl, L = this.loc;
+    const alpha = this._blendFor(opts);
+    this._bindMesh(this.quad);
+    gl.uniformMatrix4fv(L.uModel, false, composeModel(x, y, z, ry || 0, opts.pitch || 0, 0, w, h, 1));
+    gl.uniform3fv(L.uColor, [1, 1, 1]);
+    gl.uniform1f(L.uAlpha, alpha);
+    gl.uniform1f(L.uEmissive, 1);
+    const tex = this.textures[texName];
+    gl.bindTexture(gl.TEXTURE_2D, tex && tex.tex ? tex.tex : tex);
+    gl.uniform1f(L.uUseTex, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, this.quad.count);
+    this._blendOff();
   }
 }
