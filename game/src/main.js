@@ -35,7 +35,20 @@ const audio = new AudioEngine();
 function buildCityMeshes(s) {
   const city = s.city;
   const plain = new Builder(), texB = [new Builder(), new Builder(), new Builder(), new Builder()], road = new Builder(), walk = new Builder();
-  for (const b of city.buildings) texB[b.tex].box(b.x, 0, b.z, b.w, b.h, b.d, [1, 1, 1], Math.max(1, Math.round(b.h / 14)));
+  city.buildings.forEach((b, bi) => {
+    const B = texB[b.tex];
+    B.box(b.x, 0, b.z, b.w, b.h, b.d, [1, 1, 1], Math.max(1, Math.round(b.h / 14)));
+    // Architectural relief (same facade texture, tinted slightly darker):
+    B.box(b.x, b.h, b.z, b.w + 0.8, 1.0, b.d + 0.8, [0.92, 0.90, 0.86], 1);              // parapet cap
+    B.box(b.x, b.h * 0.55, b.z, b.w + 0.5, 0.55, b.d + 0.5, [0.94, 0.92, 0.88], 1);      // cornice band
+    B.box(b.x, 0, b.z, b.w + 0.6, 1.4, b.d + 0.6, [0.9, 0.88, 0.84], 1);                // podium base
+    if (bi % 3 !== 0) { // balconies on the +x face, 2-4 slabs
+      const n = 2 + (bi % 3);
+      for (let k = 0; k < n; k++) {
+        B.box(b.x + b.w / 2 + 0.45, b.h * (0.3 + 0.18 * k), b.z - b.d / 4 + (k % 2) * b.d / 2, 0.9, 0.28, 2.6, [0.88, 0.86, 0.82], 1);
+      }
+    }
+  });
   const centers = roadCenters();
   for (const c of centers) {
     road.quad([c - ROAD / 2, 0.01, -CITY_HALF - 40], [c + ROAD / 2, 0.01, -CITY_HALF - 40], [c + ROAD / 2, 0.01, CITY_HALF + 40], [c - ROAD / 2, 0.01, CITY_HALF + 40], [0, 1, 0], [0.92, 0.90, 0.87], 30);
@@ -59,11 +72,16 @@ function buildCityMeshes(s) {
   plain.box(CITY_HALF + 120, -0.4, 0, 190, 0.1, (CITY_HALF + 60) * 2, [0.13, 0.72, 0.68]);
   plain.box(CITY_HALF + 16, -0.02, 0, 26, 0.12, (CITY_HALF + 40) * 2, [0.93, 0.84, 0.62]);
   for (const pm of city.palms) {
-    const sc = pm.s || 1;
-    plain.box(pm.x, 0, pm.z, 0.34 * sc, 4.8 * sc, 0.34 * sc, [0.52, 0.42, 0.30]);
-    for (let i = 0; i < 7; i++) {
-      const a = i / 7 * Math.PI * 2;
-      plain.box(pm.x + Math.sin(a) * 1.7 * sc, 4.8 * sc + 0.3, pm.z + Math.cos(a) * 1.7 * sc, 3.6 * sc, 0.08, 0.75 * sc, [0.18, 0.62, 0.33]);
+    const sc = pm.s || 1, lean = pm.lean || 0.1;
+    // Curved trunk: 3 stacked segments leaning progressively.
+    let tx = pm.x, tz = pm.z;
+    for (let seg = 0; seg < 3; seg++) {
+      plain.box(tx, seg * 1.6 * sc, tz, 0.34 * sc, 1.7 * sc, 0.34 * sc, [0.52, 0.42, 0.30]);
+      tx += lean * (seg + 1) * 0.55 * sc; tz += lean * 0.3 * sc;
+    }
+    for (let i = 0; i < 9; i++) {
+      const a = i / 9 * Math.PI * 2;
+      plain.box(tx + Math.sin(a) * 1.8 * sc, 4.9 * sc + 0.3, tz + Math.cos(a) * 1.8 * sc, 3.8 * sc, 0.08, 0.8 * sc, [0.18, 0.62, 0.33]);
     }
   }
   for (const l of city.lights) {
@@ -128,29 +146,79 @@ function drawCar(s, car, t, interior = false) {
   R.box(x, 0.16, z, ry, 2.6, 0.06, 4.4, [0.03, 0.02, 0.05], { alpha: 0.3 });
   R.box(x, 0.18, z, ry, 2.3, 0.05, 4.0, [0.04, 0.03, 0.07], { alpha: 0.35 });
   const fx = Math.sin(ry), fz = Math.cos(ry), rx = Math.cos(ry), rz = -Math.sin(ry);
+  const style = car.kind === 'cop' ? 'police' : (car.style || 'sedan');
   if (car.kind === 'cop') {
     const ph = Math.floor(t * 5 + car.id) % 2 === 0;
     R.box(x + fx * 0.5, 0.1, z + fz * 0.5, ry, 3.4, 0.04, 5.2, ph ? [1, 0.1, 0.15] : [0.2, 0.4, 1], { alpha: 0.20 });
   }
   const body = car.kind === 'dead' ? [0.15, 0.14, 0.16] : car.color;
-  R.box(x, 0.35, z, ry, 2.0, 0.75, 4.2, body, { pitch, roll });
-  if (!interior) R.box(x, 0.95, z, ry, 1.8, 0.62, 2.2, car.kind === 'cop' ? [0.12, 0.12, 0.14] : [0.15, 0.2, 0.28], { pitch, roll });
-  if (car.kind === 'cop') {
-    const ph = Math.floor(t * 5 + car.id) % 2 === 0;
-    R.box(x, 1.35, z, ry, 1.3, 0.22, 0.5, ph ? [1, 0.15, 0.2] : [0.25, 0.45, 1], { emissive: true, pitch, roll });
-    R.box(x, 0.62, z, ry, 2.02, 0.34, 4.22, [0.1, 0.1, 0.12], { pitch, roll });
-  }
+  const glass = [0.13, 0.18, 0.24], dark = [0.08, 0.08, 0.1];
+  // P(f, r, yCentre, w, h, d, color, opts): part placed in car space.
+  const P = (f, r, y, w, h, d, color, o = {}) => R.box(x + fx * f + rx * r, y, z + fz * f + rz * r, ry, w, h, d, color, { pitch, roll, ...o });
   const steerVis = car === s.player.inCar && car.phys ? car.phys.steerAngle : (car.steer || 0) * 0.4;
   car._spin = (car._spin || 0) + (car.speed || 0) * 0.09;
-  for (const [sx, sz, front] of [[-1.02, 1.35, 1], [1.02, 1.35, 1], [-1.02, -1.35, 0], [1.02, -1.35, 0]]) {
-    const wx = x + rx * sx + fx * sz, wz = z + rz * sx + fz * sz;
-    R.box(wx, 0.38, wz, ry + (front ? steerVis : 0), 0.28, 0.72, 0.72, [0.06, 0.06, 0.08], { roll: car._spin });
-  }
+  const wheels = (rF, rR, wdt, fOff, rOff) => {
+    for (const [sx, sz, front] of [[-1, fOff, 1], [1, fOff, 1], [-1, -rOff, 0], [1, -rOff, 0]]) {
+      const rr = front ? rF : rR;
+      const wx = x + rx * sx * 0.92 + fx * sz, wz = z + rz * sx * 0.92 + fz * sz;
+      R.box(wx, rr, wz, ry + (front ? steerVis : 0), wdt, rr * 2, rr * 2, [0.05, 0.05, 0.07], { roll: car._spin });
+      R.box(wx + rx * sx * 0.16, rr, wz + rz * sx * 0.16, ry + (front ? steerVis : 0), 0.05, rr * 1.15, rr * 1.15, [0.75, 0.76, 0.8], { roll: car._spin });
+    }
+  };
   const hl = Math.sin(t * 47 + car.id) > 0 ? [1, 0.95, 0.75] : [0.9, 0.85, 0.6];
-  R.box(x + fx * 2.12 - rx * 0.6, 0.55, z + fz * 2.12 - rz * 0.6, ry, 0.4, 0.2, 0.1, hl, { emissive: true });
-  R.box(x + fx * 2.12 + rx * 0.6, 0.55, z + fz * 2.12 + rz * 0.6, ry, 0.4, 0.2, 0.1, hl, { emissive: true });
-  R.box(x - fx * 2.12 - rx * 0.6, 0.55, z - fz * 2.12 - rz * 0.6, ry, 0.4, 0.2, 0.1, [1, 0.15, 0.2], { emissive: true });
-  R.box(x - fx * 2.12 + rx * 0.6, 0.55, z - fz * 2.12 + rz * 0.6, ry, 0.4, 0.2, 0.1, [1, 0.15, 0.2], { emissive: true });
+  if (style === 'sport') {
+    P(0, 0, 0.36, 1.95, 0.52, 4.4, body);                    // low main body
+    P(1.62, 0, 0.60, 1.85, 0.30, 1.25, body, { pitch: pitch + 0.14 }); // wedge nose
+    if (!interior) {
+      P(-0.55, 0, 0.86, 1.62, 0.46, 1.7, glass);             // rear-set cabin
+      P(-0.55, 0, 1.12, 1.5, 0.07, 1.4, body);               // roof skin
+    }
+    P(-1.72, 0, 0.70, 1.85, 0.18, 0.9, body);                // rear deck
+    P(-2.02, -0.6, 0.92, 0.08, 0.2, 0.3, dark);              // spoiler strut L
+    P(-2.02, 0.6, 0.92, 0.08, 0.2, 0.3, dark);               // spoiler strut R
+    P(-2.06, 0, 1.05, 1.9, 0.06, 0.42, body);                // spoiler blade
+    wheels(0.33, 0.37, 0.30, 1.42, 1.42);
+    P(2.18, -0.62, 0.48, 0.42, 0.13, 0.08, hl, { emissive: true });
+    P(2.18, 0.62, 0.48, 0.42, 0.13, 0.08, hl, { emissive: true });
+    P(-2.18, 0, 0.58, 1.7, 0.12, 0.08, [1, 0.15, 0.2], { emissive: true }); // full-width tail bar
+  } else if (style === 'police') {
+    const white = [0.94, 0.94, 0.96], black = [0.07, 0.07, 0.09];
+    P(0, 0, 0.42, 1.9, 0.62, 4.3, white);
+    P(0.1, 0, 0.44, 1.93, 0.42, 2.3, black);                 // black door band
+    P(1.58, 0, 0.76, 1.8, 0.1, 1.05, white, { pitch: pitch + 0.08 }); // hood slope
+    if (!interior) {
+      P(-0.15, 0, 1.02, 1.7, 0.55, 2.1, glass);
+      P(-0.15, 0, 1.33, 1.6, 0.08, 1.9, white);
+    }
+    P(2.28, 0, 0.45, 0.35, 0.5, 0.18, black);                // push bar
+    const ph = Math.floor(t * 5 + car.id) % 2 === 0;
+    P(0, -0.34, 1.46, 0.62, 0.16, 0.42, ph ? [1, 0.12, 0.18] : [0.3, 0.3, 0.35], { emissive: true }); // light bar red
+    P(0, 0.34, 1.46, 0.62, 0.16, 0.42, ph ? [0.3, 0.3, 0.35] : [0.25, 0.45, 1], { emissive: true });  // light bar blue
+    wheels(0.34, 0.34, 0.28, 1.4, 1.4);
+    P(2.16, -0.6, 0.55, 0.4, 0.2, 0.1, hl, { emissive: true });
+    P(2.16, 0.6, 0.55, 0.4, 0.2, 0.1, hl, { emissive: true });
+    P(-2.16, -0.6, 0.55, 0.4, 0.2, 0.1, [1, 0.15, 0.2], { emissive: true });
+    P(-2.16, 0.6, 0.55, 0.4, 0.2, 0.1, [1, 0.15, 0.2], { emissive: true });
+  } else { // sedan + taxi
+    P(0, 0, 0.42, 1.9, 0.62, 4.3, body);
+    P(1.58, 0, 0.76, 1.8, 0.1, 1.05, body, { pitch: pitch + 0.08 }); // sloped hood
+    P(-1.98, 0, 0.78, 1.8, 0.12, 0.45, body);                // trunk lip
+    if (!interior) {
+      P(-0.15, 0, 1.02, 1.7, 0.55, 2.1, glass);
+      P(-0.15, 0, 1.33, 1.6, 0.08, 1.9, body);
+    }
+    P(2.14, 0, 0.32, 1.86, 0.22, 0.14, dark);                // front bumper
+    P(-2.14, 0, 0.32, 1.86, 0.22, 0.14, dark);               // rear bumper
+    if (style === 'taxi') {
+      P(0, 0, 0.52, 1.93, 0.13, 3.1, [0.12, 0.12, 0.14]);    // checker band
+      P(-0.15, 0, 1.48, 0.72, 0.2, 0.34, [1, 0.85, 0.4], { emissive: true }); // roof sign
+    }
+    wheels(0.34, 0.34, 0.28, 1.4, 1.4);
+    P(2.16, -0.6, 0.55, 0.4, 0.2, 0.1, hl, { emissive: true });
+    P(2.16, 0.6, 0.55, 0.4, 0.2, 0.1, hl, { emissive: true });
+    P(-2.16, -0.6, 0.55, 0.4, 0.2, 0.1, [1, 0.15, 0.2], { emissive: true });
+    P(-2.16, 0.6, 0.55, 0.4, 0.2, 0.1, [1, 0.15, 0.2], { emissive: true });
+  }
   if ((car.speed || 0) > 1 || car === s.player.inCar) {
     R.box(x + fx * 3.4, 0.35, z + fz * 3.4, ry, 2.6, 0.5, 2.6, [1, 0.95, 0.7], { alpha: 0.08 });
   }
@@ -199,6 +267,18 @@ function drawInterior(s, car) {
     q = at(0.9, sd * 1.03, 1.3);
     R.box(q[0], q[1], q[2], car.ry, 0.24, 0.12, 0.02, [0.75, 0.85, 0.95], { emissive: true });
   }
+  // centre console + gear knob between the seats
+  q = at(0.35, 0.18, 0.42);
+  R.box(q[0], q[1], q[2], car.ry, 0.42, 0.3, 1.1, [0.11, 0.11, 0.14]);
+  q = at(0.55, 0.18, 0.6);
+  R.box(q[0], q[1], q[2], car.ry, 0.07, 0.16, 0.07, [0.2, 0.2, 0.24]);
+  // rear-view mirror with a simple two-tone reflection (sky over road)
+  q = at(1.05, 0, 1.52);
+  R.box(q[0], q[1], q[2], car.ry, 0.62, 0.2, 0.05, [0.07, 0.07, 0.09]);
+  q = at(1.02, 0, 1.565);
+  R.box(q[0], q[1], q[2], car.ry, 0.54, 0.075, 0.02, [0.62, 0.78, 0.94], { emissive: true });
+  q = at(1.02, 0, 1.475);
+  R.box(q[0], q[1], q[2], car.ry, 0.54, 0.075, 0.02, [0.42, 0.42, 0.46], { emissive: true });
   q = at(1.12, 0, 1.66);
   R.box(q[0], q[1], q[2], car.ry, 2.05, 0.09, 0.3, [0.08, 0.08, 0.11]);
 }
@@ -215,19 +295,23 @@ function drawGunView(s, eye, viewYaw, viewPitch, lowered = false) {
   if (!aim) R.box(gx - d[0] * 0.22 + rx * 0.1, gy - 0.3, gz - d[2] * 0.22 + rz * 0.1, viewYaw, 0.13, 0.13, 0.42, [0.97, 0.87, 0.72], { pitch: viewPitch + 0.5 });
 }
 function drawPerson(s, x, z, ry, color, o = {}) {
+  // 7 parts: shadow, 2 legs (pants), torso (shirt), 2 arms (sleeves, swinging
+  // counter-phase to the legs), head (skin tone). Plus optional gun.
   const fx = Math.sin(ry), fz = Math.cos(ry);
+  const rx = Math.cos(ry), rz = -Math.sin(ry);
   R.box(x, 0.02, z, ry, 0.8, 0.04, 0.8, [0.03, 0.02, 0.05], { alpha: 0.3 });
   const ph = o.walkPhase || 0;
   const sw = Math.sin(ph) * 0.3;
   if (o.dead) { R.box(x, 0.12, z, ry, 0.55, 0.25, 1.6, color); return; }
-  R.box(x - fx * sw * 0.4, 0.4, z - fz * sw * 0.4, ry, 0.2, 0.8, 0.24, [0.2, 0.2, 0.3]);
-  R.box(x + fx * sw * 0.4, 0.4, z + fz * sw * 0.4, ry, 0.2, 0.8, 0.24, [0.25, 0.25, 0.35]);
+  const pants = o.pants || [0.22, 0.24, 0.34], skin = o.skin || [0.92, 0.76, 0.6];
+  R.box(x - fx * sw * 0.4 - rx * 0.11, 0.4, z - fz * sw * 0.4 - rz * 0.11, ry, 0.19, 0.8, 0.23, pants, { pitch: sw * 0.7 });
+  R.box(x + fx * sw * 0.4 + rx * 0.11, 0.4, z + fz * sw * 0.4 + rz * 0.11, ry, 0.19, 0.8, 0.23, pants, { pitch: -sw * 0.7 });
   R.box(x, 1.1, z, ry, 0.55, 0.65, 0.3, color);
   const armY = o.handsUp ? 1.95 : 1.15;
-  const armP = o.handsUp ? 0.4 : sw * 0.5;
-  R.box(x - 0.36, armY, z, ry, 0.14, 0.6, 0.16, color, { pitch: armP });
-  R.box(x + 0.36, armY, z, ry, 0.14, 0.6, 0.16, color, { pitch: -armP });
-  R.box(x, 1.62, z, ry, 0.34, 0.36, 0.34, [0.92, 0.76, 0.6]);
+  const armP = o.handsUp ? 0.4 : sw * 0.55;
+  R.box(x - rx * 0.36 + fx * sw * 0.18, armY, z - rz * 0.36 + fz * sw * 0.18, ry, 0.14, 0.6, 0.16, color, { pitch: -armP });
+  R.box(x + rx * 0.36 - fx * sw * 0.18, armY, z + rz * 0.36 - fz * sw * 0.18, ry, 0.14, 0.6, 0.16, color, { pitch: armP });
+  R.box(x, 1.62, z, ry, 0.34, 0.36, 0.34, skin);
   if (o.gun) R.box(x + fx * 0.4, 1.25, z + fz * 0.4, ry, 0.08, 0.12, 0.45, [0.08, 0.08, 0.1]);
 }
 
@@ -268,7 +352,7 @@ function render(s, t) {
   for (const c of s.cops) if (c !== p.inCar) drawCar(s, c, t);
   for (const ped of s.peds) {
     ped._phase = (ped._phase || 0) + (ped.state === 'dead' ? 0 : (ped.state === 'flee' ? 11 : 6) * lastDt * (ped.speed / 1.4));
-    drawPerson(s, ped.x, ped.z, ped.ry, ped.color, { walkPhase: ped._phase, dead: ped.state === 'dead', handsUp: ped.state === 'handsup' || ped.state === 'robbed' });
+    drawPerson(s, ped.x, ped.z, ped.ry, ped.color, { walkPhase: ped._phase, dead: ped.state === 'dead', handsUp: ped.state === 'handsup' || ped.state === 'robbed', pants: ped.pants, skin: ped.skin });
   }
   drawParticles();
   if (p.inCar) drawInterior(s, p.inCar);

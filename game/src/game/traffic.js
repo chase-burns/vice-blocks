@@ -24,6 +24,7 @@ export function spawnTraffic(rng, n = 16) {
       speed: 0, targetSpeed: rng.range(9.5, 12.5), horiz, road, dir,
       color: rng.chance(0.14) ? [0.98, 0.78, 0.15] : CAR_COLORS[rng.int(0, CAR_COLORS.length - 1)], // some taxis
       hp: 100, smoke: 0, driver: true, stopped: 0,
+      style: 'sedan',
     });
   }
   return cars;
@@ -42,6 +43,7 @@ export function spawnParked(rng, n = 10) {
       ry: horiz ? Math.PI / 2 : 0, speed: 0, targetSpeed: 11,
       horiz, road, dir: 1, color: CAR_COLORS[rng.int(0, CAR_COLORS.length - 1)],
       hp: 100, smoke: 0, driver: false, stopped: 0,
+      style: 'sedan',
     });
   }
   return cars;

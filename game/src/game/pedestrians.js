@@ -10,6 +10,13 @@ export const PED_COLORS = [
   [0.30, 0.55, 0.98], [0.90, 0.30, 0.45], [0.35, 0.85, 0.65], [0.95, 0.75, 0.55],
 ];
 
+export const PANTS = [
+  [0.20, 0.26, 0.45], [0.85, 0.80, 0.68], [0.16, 0.16, 0.18], [0.55, 0.42, 0.30], [0.92, 0.92, 0.90], [0.35, 0.45, 0.30],
+];
+export const SKINS = [
+  [0.98, 0.80, 0.64], [0.88, 0.66, 0.48], [0.68, 0.47, 0.32], [0.48, 0.32, 0.21],
+];
+
 export function spawnPed(s, rng) {
   const centers = roadCenters();
   const road = centers[rng.int(0, centers.length - 1)];
@@ -21,6 +28,8 @@ export function spawnPed(s, rng) {
     ry: rng.range(0, Math.PI * 2), speed: rng.range(1.2, 1.6),
     horiz, road, side, dir: rng.chance(0.5) ? 1 : -1,
     color: PED_COLORS[rng.int(0, PED_COLORS.length - 1)],
+    pants: PANTS[rng.int(0, PANTS.length - 1)],
+    skin: SKINS[rng.int(0, SKINS.length - 1)],
     state: 'walk', t: rng.range(2, 6), cash: rng.int(50, 250), robbed: false, aimTime: 0,
   };
 }

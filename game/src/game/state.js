@@ -26,6 +26,13 @@ export function createState(seed, saved) {
   s.wantedAPI = { add: wanted.addWanted };
   s.playerAPI = { hurt: player.hurt };
   s.cars = [...spawnTraffic(rng, 16), ...spawnParked(rng, 10)];
+  // Body styles: taxis by colour, a share of sports coupes, rest sedans.
+  for (const c of s.cars) {
+    if (c.color[0] > 0.9 && c.color[1] > 0.7 && c.color[2] < 0.3) c.style = 'taxi';
+    else if (rng.chance(0.24)) c.style = 'sport';
+  }
+  const firstParked = s.cars.find(c => c.kind === 'parked');
+  if (firstParked) firstParked.style = 'sport';
   for (let i = 0; i < 30; i++) s.peds.push(spawnPed(s, rng));
   if (saved) {
     if (typeof saved.cash === 'number') s.cash = saved.cash;
