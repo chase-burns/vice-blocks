@@ -57,7 +57,11 @@ export function setupShotScene(s, kind) {
   }
   if (kind === 'chase') {
     const car = s.cars.find(c => c.kind === 'parked');
-    car.kind = 'player'; car.x = BLOCK * 0.5; car.z = BLOCK * 0.5; car.ry = 0.9;
+    // Snap onto a straight vertical road, facing +Z down its length, so the
+    // roadblock / heli / wreck staged ahead are actually in frame.
+    const centers = roadCenters();
+    const roadC = centers.reduce((a, b) => Math.abs(b - BLOCK * 0.5) < Math.abs(a - BLOCK * 0.5) ? b : a, centers[0]);
+    car.kind = 'player'; car.x = roadC - 3.6; car.z = -30; car.ry = 0;
     p.inCar = car; p.x = car.x; p.z = car.z;
     car.rpm = 0.8; s.wanted = 4; s.trauma = 0.45;
     const fx = Math.sin(car.ry), fz = Math.cos(car.ry), rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
@@ -65,31 +69,64 @@ export function setupShotScene(s, kind) {
     s.cops.push(mkCop(car.x - rx * 2.6 + fx * 0.6, car.z - rz * 2.6 + fz * 0.6, car.ry + 0.15));
     s.cops.push(mkCop(car.x - fx * 14 + rx * 5, car.z - fz * 14 + rz * 5, car.ry));
     // 4-star roadblock: two cruisers side by side across the road ahead.
-    for (const sd of [-2.3, 2.3]) {
-      const rb = mkCop(car.x + fx * 19 + rx * sd, car.z + fz * 19 + rz * sd, car.ry + Math.PI / 2);
+    for (const sd of [-3.0, 3.0]) {
+      const rb = mkCop(car.x + fx * 13 + rx * sd, car.z + fz * 13 + rz * sd, car.ry + Math.PI / 2);
       rb.roadblock = true; rb.speed = 0;
       s.cops.push(rb);
     }
     // Air unit overhead, spotlight locked on the player car (staged for frame).
-    s.heli = { a: 0, h: 17, x: car.x + fx * 26 - rx * 10, z: car.z + fz * 26 - rz * 10 };
+    s.heli = { a: 0, h: 6, ry: car.ry + 0.9, x: car.x + fx * 15 - rx * 3.5, z: car.z + fz * 15 - rz * 3.5 };
     // A burning wreck by the roadside for the explosion chain money-shot.
-    const wreck = placeTrafficAt(s, 3, car.x + fx * 12 + rx * 9, car.z + fz * 12 + rz * 9, car.ry + 0.7, [0.3, 0.3, 0.34]);
+    const wreck = placeTrafficAt(s, 3, car.x + fx * 11 - rx * 8, car.z + fz * 11 - rz * 8, car.ry + 0.7, [0.3, 0.3, 0.34]);
     wreck.burning = 1.4; wreck.hp = 0;
     // Bystander traffic + fleeing peds at the intersection corners.
     placeTrafficAt(s, 0, car.x + fx * 26 - rx * 8, car.z + fz * 26 - rz * 8, car.ry + Math.PI / 2, [0.98, 0.78, 0.15]);
     placeTrafficAt(s, 1, car.x - fx * 10 + rx * 10, car.z - fz * 10 + rz * 10, car.ry, [0.4, 0.7, 0.4]);
-    const road = BLOCK * 0.5;
-    placePedAt(s, 0, road - 10, road - 12, false, road, -10);
-    placePedAt(s, 1, road + 10.5, road + 14, false, road, 10.5);
-    placePedAt(s, 2, road + 2, road + 22, true, road, 12);
-    placePedAt(s, 3, road + 16, road + 4, true, road, -13);
+    const road = roadC;
+    placePedAt(s, 0, road - 10, -42, false, road, -10);
+    placePedAt(s, 1, road + 10.5, -16, false, road, 10.5);
+    placePedAt(s, 2, road + 2, -8, true, road, 12);
+    placePedAt(s, 3, road + 16, -26, true, road, -13);
     for (let i = 0; i < 26; i++) out.puffs.push({ x: car.x - fx * 2 + rng.range(-1, 1), y: 0.5, z: car.z - fz * 2 + rng.range(-1, 1), vx: -fx * 2, vy: rng.range(1, 2), vz: -fz * 2, life: 1.6, size: 0.9, color: [0.85, 0.85, 0.88] });
     for (let i = 0; i < 10; i++) out.puffs.push({ x: car.x - rx * 2.2, y: 0.8, z: car.z - rz * 2.2, vx: -rx * 3, vy: 1.5, vz: -rz * 3, life: 0.5, size: 0.3, color: [1, 0.75, 0.25] });
     out.skids = [{ x: car.x - fx * 6, z: car.z - fz * 6, ry: car.ry, len: 9 }, { x: car.x - fx * 10, z: car.z - fz * 10, ry: car.ry + 0.2, len: 8 }];
   }
   if (kind === 'end') {
     const z = s.city.zones.spray;
-    p.x = z.x - 10; p.z = z.z + 12;
+    // Pick a vantage with a clear sightline to the spray: no palm near the
+    // camera or across the first 8 m of the view ray, no car on top of us.
+    const candidates = [[-10, 12], [-4, 14], [-14, 6], [-6, 8], [-12, 16], [-2, 10], [-16, 12]];
+    let placed = false;
+    for (const [ox, oz] of candidates) {
+      const px = z.x + ox, pz = z.z + oz;
+      const fx = Math.sin(Math.atan2(z.x - px, z.z - pz)), fz = Math.cos(Math.atan2(z.x - px, z.z - pz));
+      let clear = true;
+      for (const pm of s.city.palms) {
+        const d0 = Math.hypot(pm.x - px, pm.z - pz);
+        if (d0 < 2.5) { clear = false; break; }
+        for (let t = 1; t < 8; t += 1.5) {
+          if (Math.hypot(pm.x - (px + fx * t), pm.z - (pz + fz * t)) < 1.8) { clear = false; break; }
+        }
+        if (!clear) break;
+      }
+      if (clear) for (const c of s.cars) if (Math.hypot(c.x - px, c.z - pz) < 3) { clear = false; break; }
+      if (clear) {
+        // Buildings too: not standing inside one, none blocking the view ray.
+        const aabbD = (bx, bz, b) => {
+          const dx = Math.max(Math.abs(bx - b.x) - b.w / 2, 0);
+          const dz = Math.max(Math.abs(bz - b.z) - b.d / 2, 0);
+          return Math.hypot(dx, dz);
+        };
+        for (const b of s.city.buildings) {
+          if (aabbD(px, pz, b) < 2.5) { clear = false; break; }
+          let blocked = false;
+          for (let t = 1.5; t < 11; t += 1.5) if (aabbD(px + fx * t, pz + fz * t, b) < 1.2) { blocked = true; break; }
+          if (blocked) { clear = false; break; }
+        }
+      }
+      if (clear) { p.x = px; p.z = pz; placed = true; break; }
+    }
+    if (!placed) { p.x = z.x - 10; p.z = z.z + 12; }
     s.camYaw = Math.atan2(z.x - p.x, z.z - p.z); p.ry = s.camYaw;
     s.hasGun = true;
     const gold = s.cars.find(c => c.kind === 'parked');
@@ -104,7 +141,8 @@ export function setupShotScene(s, kind) {
     s.mission = { name: 'THE RIVAL DEAL', desc: 'REWARD: $20,000', target: null };
     s.cash = 21450; s.wanted = 0;
     out.skids = [{ x: z.x - 6, z: z.z + 2, ry: Math.PI / 2, len: 10 }, { x: z.x - 11, z: z.z + 2.6, ry: Math.PI / 2, len: 8 }];
-    for (let i = 0; i < 8; i++) out.puffs.push({ x: p.x + Math.sin(s.camYaw) * 0.6, y: 1.5 + i * 0.1, z: p.z + Math.cos(s.camYaw) * 0.6, vx: 0.2, vy: 0.7, vz: 0.1, life: 1.4, size: 0.22, color: [0.8, 0.8, 0.82] });
+    // Celebration smoke rises off the gold car, NOT in the camera's face.
+    for (let i = 0; i < 8; i++) out.puffs.push({ x: z.x + (i % 3 - 1) * 0.8, y: 1.2 + i * 0.35, z: z.z + (i % 2) * 1.2 - 0.6, vx: 0.2, vy: 0.7, vz: 0.1, life: 1.4, size: 0.3, color: [0.8, 0.8, 0.82] });
   }
   return out;
 }

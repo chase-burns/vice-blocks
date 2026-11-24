@@ -57,7 +57,7 @@ export function updateHUD(s, ui, nearCarFn) {
   ui.stars.style.color = s.wanted ? '#FFD700' : '#2A2A38';
   ui.stars.style.textShadow = s.wanted ? '0 0 10px rgba(255,215,0,.9)' : 'none';
   const car = s.player.inCar;
-  ui.weapon.textContent = car ? `GEAR ${car.gear === 0 ? 'R' : car.gear} · ${car.isDrifting ? 'DRIFT!' : ''}${s.radio ? ` · RADIO ${s.radio === 1 ? 'VICE FM' : 'SOLMAR'}` : ''}`
+  ui.weapon.textContent = car ? `GEAR ${car.gear === 0 ? 'R' : (car.gear == null ? 'N' : car.gear)} · ${car.isDrifting ? 'DRIFT!' : ''}${s.radio ? ` · RADIO ${s.radio === 1 ? 'VICE FM' : 'SOLMAR'}` : ''}`
     : (s.hasGun ? (s.weapon === 'smg' && s.hasSmg ? `SMG ${s.ammoSmg} / ${s.reserve}` : `PISTOL ${s.ammo} / ${s.reserve}`) + (s.reloadT > 0 ? ' · RELOADING' : '') : 'UNARMED');
   if (ui.respectfill) {
     const r = s.respect || 0;

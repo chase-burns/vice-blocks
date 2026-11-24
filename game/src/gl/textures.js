@@ -63,6 +63,7 @@ export function makeTextures(gl) {
     const c = document.createElement('canvas'); c.width = 256; c.height = 128;
     const g = c.getContext('2d');
     g.fillStyle = '#0a0a0e'; g.fillRect(0, 0, 256, 128);
+    g.save(); g.translate(0, 128); g.scale(1, -1); // texture V is flipped in upload (no FLIP_Y): pre-flip vertically
     const gauge = (cx, label) => {
       g.strokeStyle = '#2a2f3a'; g.lineWidth = 5;
       g.beginPath(); g.arc(cx, 64, 46, 0, Math.PI * 2); g.stroke();
@@ -77,7 +78,7 @@ export function makeTextures(gl) {
       g.fillStyle = '#ffe1b8'; g.font = 'bold 11px monospace'; g.textAlign = 'center';
       g.fillText(label, cx, 100);
     };
-    gauge(64, 'MPH'); gauge(192, 'RPM');
+    gauge(64, 'MPH'); gauge(192, 'RPM'); g.restore();
     out.dash = canvasTex(gl, c, false);
   }
   // Soft radial particle sprite.
@@ -100,6 +101,7 @@ export function drawDashTexture(gl, tex, mph, rpm) {
   })());
   const g = c.getContext('2d');
   g.fillStyle = '#0a0a0e'; g.fillRect(0, 0, 256, 128);
+  g.save(); g.translate(0, 128); g.scale(1, -1); // texture V is flipped in upload (no FLIP_Y): pre-flip vertically
   const gauge = (cx, label, frac) => {
     g.strokeStyle = '#2a2f3a'; g.lineWidth = 5;
     g.beginPath(); g.arc(cx, 64, 46, 0, Math.PI * 2); g.stroke();
@@ -117,7 +119,7 @@ export function drawDashTexture(gl, tex, mph, rpm) {
     g.fillStyle = '#ffe1b8'; g.font = 'bold 11px monospace'; g.textAlign = 'center';
     g.fillText(label, cx, 100);
   };
-  gauge(64, 'MPH', mph / 120); gauge(192, 'RPM', rpm);
+  gauge(64, 'MPH', mph / 120); gauge(192, 'RPM', rpm); g.restore();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
 }

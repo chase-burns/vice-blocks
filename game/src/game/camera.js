@@ -37,6 +37,7 @@ export class CameraRig {
     const targetFov = 75 * Math.PI / 180 + clamp(aLong * 0.35, -5, 12) * Math.PI / 180;
     this.fovPunch += (targetFov - this.fovPunch) * Math.min(1, dt * 6);
     if (!this.fovPunch) this.fovPunch = targetFov;
+    this.fovPunch = clamp(this.fovPunch, 0.9, 2.2); // never let tan(fov/2) go negative
     const yaw = car.ry + lookYaw;
     const pitch = lookPitch + this.springP * 0.7;
     const d = viewDir(yaw, pitch);

@@ -35,6 +35,7 @@ export function enterExitCar(s) {
   }
   if (best) {
     best.hpMax = s.armorUp ? 150 : 100; // garage armour upgrade raises the cap
+    if (best.gear == null) best.gear = 1;
     if (!best.phys) best.phys = new VehiclePhysics();
     best.phys.u = best.speed || 0; best.phys.v = 0; best.phys.omega = 0;
     p.inCar = best;
