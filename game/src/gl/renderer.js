@@ -76,9 +76,9 @@ export class Renderer {
       cam: U('uCam'), alpha: U('uAlpha'), sky: U('uSky'),
     };
     gl.enable(gl.DEPTH_TEST);
-    gl.clearColor(0.12, 0.0, 0.17, 1.0);
-    this.fogColor = [0.24, 0.11, 0.28];   // #3D1B48
-    this.horizon = [0.83, 0.25, 0.23];    // #D4413B
+    gl.clearColor(0.99, 0.76, 0.56, 1.0);
+    this.fogColor = [0.99, 0.80, 0.62];   // warm peach haze
+    this.horizon = [1.0, 0.70, 0.47];     // golden horizon
     this.sunDir = (() => { const v = [0.8, 0.25, -0.5]; const l = Math.hypot(...v); return v.map(x => x / l); })();
     this.textures = makeTextures(gl);
     console.log('WebGL Initialized: 60 FPS target');

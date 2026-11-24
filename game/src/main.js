@@ -37,8 +37,8 @@ function buildCityMeshes(s) {
   for (const b of city.buildings) texB[b.tex].box(b.x, 0, b.z, b.w, b.h, b.d, [1, 1, 1], Math.max(1, Math.round(b.h / 14)));
   const centers = roadCenters();
   for (const c of centers) {
-    road.quad([c - ROAD / 2, 0.01, -CITY_HALF - 40], [c + ROAD / 2, 0.01, -CITY_HALF - 40], [c + ROAD / 2, 0.01, CITY_HALF + 40], [c - ROAD / 2, 0.01, CITY_HALF + 40], [0, 1, 0], [0.30, 0.30, 0.36], 30);
-    road.quad([-CITY_HALF - 40, 0.01, c - ROAD / 2], [CITY_HALF + 40, 0.01, c - ROAD / 2], [CITY_HALF + 40, 0.01, c + ROAD / 2], [-CITY_HALF - 40, 0.01, c + ROAD / 2], [0, 1, 0], [0.30, 0.30, 0.36], 30);
+    road.quad([c - ROAD / 2, 0.01, -CITY_HALF - 40], [c + ROAD / 2, 0.01, -CITY_HALF - 40], [c + ROAD / 2, 0.01, CITY_HALF + 40], [c - ROAD / 2, 0.01, CITY_HALF + 40], [0, 1, 0], [0.92, 0.90, 0.87], 30);
+    road.quad([-CITY_HALF - 40, 0.01, c - ROAD / 2], [CITY_HALF + 40, 0.01, c - ROAD / 2], [CITY_HALF + 40, 0.01, c + ROAD / 2], [-CITY_HALF - 40, 0.01, c + ROAD / 2], [0, 1, 0], [0.92, 0.90, 0.87], 30);
     for (const zz of [-1, 1]) {
       walk.box(c + zz * (ROAD / 2 + 1), 0, 0, 2, 0.18, (CITY_HALF + 40) * 2, [1, 1, 1]);
       walk.box(0, 0, c + zz * (ROAD / 2 + 1), (CITY_HALF + 40) * 2, 0.18, 2, [1, 1, 1]);
@@ -53,15 +53,16 @@ function buildCityMeshes(s) {
       plain.box(c + k * 1.1, 0.035, c2 + ROAD / 2 - 1.2, 0.6, 0.02, 2.2, [0.9, 0.9, 0.92]);
     }
   }
-  plain.box(0, -0.05, 0, (CITY_HALF + 42) * 2, 0.1, (CITY_HALF + 42) * 2, [0.23, 0.22, 0.28]);
-  // ocean on the east flank + beach strip
-  plain.box(CITY_HALF + 120, -0.4, 0, 190, 0.1, (CITY_HALF + 60) * 2, [0.10, 0.35, 0.55]);
-  plain.box(CITY_HALF + 16, -0.02, 0, 26, 0.12, (CITY_HALF + 40) * 2, [0.92, 0.82, 0.58]);
+  plain.box(0, -0.05, 0, (CITY_HALF + 42) * 2, 0.1, (CITY_HALF + 42) * 2, [0.66, 0.60, 0.50]);
+  // turquoise ocean on the east flank + beach strip
+  plain.box(CITY_HALF + 120, -0.4, 0, 190, 0.1, (CITY_HALF + 60) * 2, [0.13, 0.72, 0.68]);
+  plain.box(CITY_HALF + 16, -0.02, 0, 26, 0.12, (CITY_HALF + 40) * 2, [0.93, 0.84, 0.62]);
   for (const pm of city.palms) {
-    plain.box(pm.x, 0, pm.z, 0.35, 4.6, 0.35, [0.45, 0.32, 0.2]);
-    for (let i = 0; i < 6; i++) {
-      const a = i / 6 * Math.PI * 2;
-      plain.box(pm.x + Math.sin(a) * 1.6, 4.6 + 0.3, pm.z + Math.cos(a) * 1.6, 3.4, 0.08, 0.7, [0.25, 0.75, 0.4]);
+    const sc = pm.s || 1;
+    plain.box(pm.x, 0, pm.z, 0.34 * sc, 4.8 * sc, 0.34 * sc, [0.52, 0.42, 0.30]);
+    for (let i = 0; i < 7; i++) {
+      const a = i / 7 * Math.PI * 2;
+      plain.box(pm.x + Math.sin(a) * 1.7 * sc, 4.8 * sc + 0.3, pm.z + Math.cos(a) * 1.7 * sc, 3.6 * sc, 0.08, 0.75 * sc, [0.18, 0.62, 0.33]);
     }
   }
   for (const l of city.lights) {
@@ -78,7 +79,7 @@ function buildCityMeshes(s) {
     const a = i / 26 * Math.PI * 2;
     if (Math.cos(a) > 0.35) continue;
     const d = CITY_HALF + 130 + (i % 5) * 30;
-    plain.box(Math.sin(a) * d, 0, Math.cos(a) * d, 34, 40 + (i * 37) % 70, 34, [0.16, 0.12, 0.24]);
+    plain.box(Math.sin(a) * d, 0, Math.cos(a) * d, 34, 40 + (i * 37) % 70, 34, [0.58, 0.65, 0.72]);
   }
   const lampDots = new Builder();
   for (const l of city.lights) lampDots.box(l.x, 5.2, l.z, 0.55, 0.3, 0.55, [1, 0.85, 0.5]);
@@ -165,25 +166,32 @@ function drawInterior(s, car) {
   R.box(q[0], q[1], q[2], car.ry, 2.05, 0.07, 0.42, [0.16, 0.15, 0.2]);
   // live instrument cluster (canvas texture, needles track speed/rpm)
   q = at(1.40, -0.05, 0.98);
-  R.panel(q[0], q[1], q[2], car.ry, 1.3, 0.62, 'dash', { pitch: -0.25 });
-  // steering wheel: open rim of bars, rotation = steer angle x 3.2 (WO Task 6)
+  R.panel(q[0], q[1], q[2], car.ry, 1.15, 0.55, 'dash', { pitch: -0.25 });
+  // steering wheel: slim ring (r=0.19) + three spokes, rotation = steer x 3.2
   const wheelRoll = -(car.phys ? car.phys.steerAngle : 0) * 3.2;
-  const wc = at(0.66, -0.35, 0.86);
+  const wc = at(0.70, -0.35, 0.84);
   const wob = (dx, dy) => {
     const cr = Math.cos(wheelRoll), sr = Math.sin(wheelRoll);
     const lx = dx * cr - dy * sr, ly = dx * sr + dy * cr;
     return [wc[0] + rx * lx, wc[1] + ly, wc[2] + rz * lx];
   };
+  const rimC = [0.13, 0.13, 0.15], spokeC = [0.22, 0.22, 0.25];
   let b;
-  b = wob(0, 0.21); R.box(b[0], b[1], b[2], car.ry, 0.5, 0.07, 0.07, [0.07, 0.07, 0.09], { pitch: -0.32, roll: wheelRoll });
-  b = wob(0, -0.21); R.box(b[0], b[1], b[2], car.ry, 0.5, 0.07, 0.07, [0.07, 0.07, 0.09], { pitch: -0.32, roll: wheelRoll });
-  b = wob(-0.21, 0); R.box(b[0], b[1], b[2], car.ry, 0.07, 0.36, 0.07, [0.07, 0.07, 0.09], { pitch: -0.32, roll: wheelRoll });
-  b = wob(0.21, 0); R.box(b[0], b[1], b[2], car.ry, 0.07, 0.36, 0.07, [0.07, 0.07, 0.09], { pitch: -0.32, roll: wheelRoll });
-  b = wob(0, -0.1); R.box(b[0], b[1], b[2], car.ry, 0.07, 0.22, 0.08, [0.2, 0.2, 0.24], { pitch: -0.32, roll: wheelRoll });
-  b = wob(0, 0); R.box(b[0], b[1], b[2], car.ry, 0.17, 0.17, 0.11, [0.12, 0.12, 0.15], { pitch: -0.32, roll: wheelRoll });
-  // driver hands on the wheel
-  b = wob(-0.2, 0.05); R.box(b[0], b[1], b[2], car.ry, 0.13, 0.1, 0.16, [0.92, 0.76, 0.6], { pitch: -0.32, roll: wheelRoll });
-  b = wob(0.2, 0.05); R.box(b[0], b[1], b[2], car.ry, 0.13, 0.1, 0.16, [0.92, 0.76, 0.6], { pitch: -0.32, roll: wheelRoll });
+  // ring: 12 short segments approximating a circle
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * Math.PI * 2;
+    b = wob(Math.cos(a) * 0.19, Math.sin(a) * 0.19);
+    R.box(b[0], b[1], b[2], car.ry, 0.115, 0.048, 0.05, rimC, { pitch: -0.32, roll: wheelRoll + a + Math.PI / 2 });
+  }
+  // three spokes: down, lower-left, lower-right (classic 3-spoke layout)
+  for (const a of [-Math.PI / 2, -Math.PI / 2 - 2.1, -Math.PI / 2 + 2.1]) {
+    b = wob(Math.cos(a) * 0.095, Math.sin(a) * 0.095);
+    R.box(b[0], b[1], b[2], car.ry, 0.20, 0.042, 0.055, spokeC, { pitch: -0.32, roll: wheelRoll + a });
+  }
+  b = wob(0, 0); R.box(b[0], b[1], b[2], car.ry, 0.11, 0.11, 0.09, [0.16, 0.16, 0.19], { pitch: -0.32, roll: wheelRoll });
+  // driver hands gripping the rim at 9 and 3
+  b = wob(-0.19, 0.02); R.box(b[0], b[1], b[2], car.ry, 0.11, 0.09, 0.14, [0.92, 0.76, 0.6], { pitch: -0.32, roll: wheelRoll });
+  b = wob(0.19, 0.02); R.box(b[0], b[1], b[2], car.ry, 0.11, 0.09, 0.14, [0.92, 0.76, 0.6], { pitch: -0.32, roll: wheelRoll });
   for (const sd of [-1, 1]) {
     q = at(0.92, sd * 1.04, 1.3);
     R.box(q[0], q[1], q[2], car.ry, 0.3, 0.17, 0.05, [0.08, 0.08, 0.1]);
@@ -203,7 +211,7 @@ function drawGunView(s, eye, viewYaw, viewPitch, lowered = false) {
   R.box(gx, gy, gz, viewYaw, 0.09, 0.15, 0.46, [0.1, 0.1, 0.12], { pitch: viewPitch });
   R.box(gx + d[0] * 0.3, gy + d[1] * 0.3 + 0.02, gz + d[2] * 0.3, viewYaw, 0.05, 0.05, 0.26, [0.16, 0.16, 0.18], { pitch: viewPitch });
   R.box(gx - d[0] * 0.08 + rx * 0.02, gy - 0.13, gz - d[2] * 0.08 + rz * 0.02, viewYaw, 0.15, 0.11, 0.2, [0.92, 0.76, 0.6], { pitch: viewPitch });
-  if (!aim) R.box(gx - d[0] * 0.22 + rx * 0.1, gy - 0.3, gz - d[2] * 0.22 + rz * 0.1, viewYaw, 0.13, 0.13, 0.42, [0.95, 0.45, 0.75], { pitch: viewPitch + 0.5 });
+  if (!aim) R.box(gx - d[0] * 0.22 + rx * 0.1, gy - 0.3, gz - d[2] * 0.22 + rz * 0.1, viewYaw, 0.13, 0.13, 0.42, [0.97, 0.87, 0.72], { pitch: viewPitch + 0.5 });
 }
 function drawPerson(s, x, z, ry, color, o = {}) {
   const fx = Math.sin(ry), fz = Math.cos(ry);
@@ -239,7 +247,7 @@ function render(s, t) {
   R.draw(MESH.walk, IDM, { tex: 'walk' });
   for (let i = 0; i < 4; i++) R.draw(MESH.tex[i], IDM, { tex: 'b' + i });
   R.draw(MESH.lampDots, IDM, { emissive: true });
-  for (const sg of MESH.signs) R.box(sg.x, sg.y, sg.z, sg.ry, sg.w, sg.h, 0.18, sg.color, { emissive: true });
+  for (const sg of MESH.signs) R.box(sg.x, sg.y, sg.z, sg.ry, sg.w, sg.h, 0.18, sg.color);
   for (const l of MESH.lights) R.box(l.x, 4.4, l.z, 0, 2.6, 0.05, 2.6, [1, 0.8, 0.45], { alpha: 0.10 });
   const zz = s.city.zones;
   for (const key of ['gunshop', 'hospital', 'spray', 'contact', 'harbor']) {

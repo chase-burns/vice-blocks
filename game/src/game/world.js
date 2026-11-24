@@ -23,8 +23,8 @@ const PALETTE = [
   [0.96, 0.55, 0.75], [0.45, 0.85, 0.95], [0.98, 0.80, 0.45], [0.70, 0.60, 0.95],
   [0.55, 0.95, 0.70], [0.95, 0.65, 0.50], [0.85, 0.90, 0.98], [0.60, 0.75, 0.90],
 ];
-const NEON = [
-  [1.0, 0.25, 0.65], [0.2, 0.95, 1.0], [1.0, 0.85, 0.2], [0.55, 0.35, 1.0], [0.3, 1.0, 0.55],
+const NEON = [ // pastel shopfront signs (kept sparse, mostly unlit paint)
+  [0.98, 0.62, 0.50], [0.85, 0.93, 0.98], [0.98, 0.85, 0.60], [0.75, 0.90, 0.80], [0.96, 0.75, 0.82],
 ];
 
 export function genCity(seed) {
@@ -46,7 +46,7 @@ export function genCity(seed) {
         const h = downtown ? rng.range(70, 110) : beach ? rng.range(12, 30) : rng.range(20, 60);
         const b = { x: cx + ox, z: cz + oz, w, d, h, color: PALETTE[rng.int(0, PALETTE.length - 1)], tex: rng.int(0, 3), seed: rng.int(0, 9999) };
         buildings.push(b);
-        if (rng.chance(0.5)) {
+        if (rng.chance(0.2)) {
           const col = NEON[rng.int(0, NEON.length - 1)];
           const face = rng.int(0, 3);
           const sw = rng.range(4, 8), sh = rng.range(1.2, 2.2), sy = rng.range(3, Math.min(h - 2, 12));
@@ -60,10 +60,15 @@ export function genCity(seed) {
       }
       const e = lot / 2 + 2.2;
       for (const [ox, oz] of [[-e, -e], [e, -e], [-e, e], [e, e]]) {
-        if (rng.chance(0.55)) palms.push({ x: cx + ox, z: cz + oz, s: rng.range(0.8, 1.3), lean: rng.range(-0.12, 0.12) });
+        if (rng.chance(0.78)) palms.push({ x: cx + ox, z: cz + oz, s: rng.range(0.85, 1.45), lean: rng.range(-0.12, 0.12) });
         else if (rng.chance(0.6)) lights.push({ x: cx + ox, z: cz + oz });
       }
     }
+  }
+  // Beachfront palm rows along the east promenade.
+  for (let z = -CITY_HALF + 4; z < CITY_HALF - 2; z += 11) {
+    palms.push({ x: CITY_HALF - 3.5, z: z + rng.range(-1.5, 1.5), s: rng.range(1.0, 1.5), lean: rng.range(-0.1, 0.16) });
+    if (rng.chance(0.6)) palms.push({ x: CITY_HALF - 9, z: z + 5 + rng.range(-1, 1), s: rng.range(0.9, 1.3), lean: rng.range(-0.14, 0.1) });
   }
   const centers = roadCenters();
   for (let i = 0; i < 90; i++) {

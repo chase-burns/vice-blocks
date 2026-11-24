@@ -14,31 +14,31 @@ function lcg(seed) { let s = seed; return () => { s = (s * 16807) % 2147483647; 
 
 export function makeTextures(gl) {
   const out = {};
-  // Building facades: dark glass + lit windows (cyan / amber / pink mix).
+  // Building facades: pastel Art Deco walls, sparse warm-lit windows.
   const variants = [
-    { wall: '#131c2c', seed: 1234 }, { wall: '#18222e', seed: 555 },
-    { wall: '#1c1626', seed: 987 }, { wall: '#101a1a', seed: 313 },
+    { wall: '#f2ede2', seed: 1234 }, { wall: '#f6cf9f', seed: 555 },
+    { wall: '#bfe0cd', seed: 987 }, { wall: '#f4c3d2', seed: 313 },
   ];
   variants.forEach((v, vi) => {
     const c = document.createElement('canvas'); c.width = 128; c.height = 256;
     const g = c.getContext('2d');
     g.fillStyle = v.wall; g.fillRect(0, 0, 128, 256);
     const rnd = lcg(v.seed + vi * 777);
-    const litCols = ['#00F0FF', '#FFB347', '#FF007F', '#00F0FF', '#FFB347'];
-    for (let y = 8; y < 248; y += 16) {
-      for (let x = 8; x < 120; x += 16) {
+    const litCols = ['#ffd98a', '#ffb36b', '#ffe9bb'];
+    for (let y = 10; y < 246; y += 21) {
+      for (let x = 10; x < 118; x += 21) {
         const r = rnd();
-        g.fillStyle = r < 0.62 ? litCols[Math.floor(rnd() * litCols.length)] : '#0D1520';
-        g.fillRect(x, y, 10, 9);
+        g.fillStyle = r < 0.30 ? litCols[Math.floor(rnd() * litCols.length)] : '#46545e';
+        g.fillRect(x, y, 11, 12);
       }
     }
     out['b' + vi] = canvasTex(gl, c, true);
   });
-  // Road: wet dark asphalt with grain (used tinted on road quads).
+  // Road: warm light-gray asphalt with grain, sun-bleached.
   {
     const c = document.createElement('canvas'); c.width = 256; c.height = 256;
     const g = c.getContext('2d');
-    g.fillStyle = '#121118'; g.fillRect(0, 0, 256, 256);
+    g.fillStyle = '#5b5751'; g.fillRect(0, 0, 256, 256);
     const rnd = lcg(42);
     for (let i = 0; i < 5200; i++) {
       g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.16)';
@@ -46,12 +46,12 @@ export function makeTextures(gl) {
     }
     out.road = canvasTex(gl, c, true);
   }
-  // Sidewalk pavers.
+  // Sidewalk pavers: warm sand stone.
   {
     const c = document.createElement('canvas'); c.width = 128; c.height = 128;
     const g = c.getContext('2d');
-    g.fillStyle = '#4A4753'; g.fillRect(0, 0, 128, 128);
-    g.strokeStyle = '#2B2933'; g.lineWidth = 3;
+    g.fillStyle = '#cfc0a0'; g.fillRect(0, 0, 128, 128);
+    g.strokeStyle = '#b3a184'; g.lineWidth = 3;
     for (let i = 0; i <= 128; i += 32) {
       g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 128); g.stroke();
       g.beginPath(); g.moveTo(0, i); g.lineTo(128, i); g.stroke();
@@ -66,7 +66,7 @@ export function makeTextures(gl) {
     const gauge = (cx, label) => {
       g.strokeStyle = '#2a2f3a'; g.lineWidth = 5;
       g.beginPath(); g.arc(cx, 64, 46, 0, Math.PI * 2); g.stroke();
-      g.strokeStyle = '#00F0FF'; g.lineWidth = 2;
+      g.strokeStyle = '#ffb36b'; g.lineWidth = 2;
       for (let i = 0; i <= 10; i++) {
         const a = Math.PI * 0.75 + i * Math.PI * 1.5 / 10;
         g.beginPath();
@@ -74,7 +74,7 @@ export function makeTextures(gl) {
         g.lineTo(cx + Math.cos(a) * 45, 64 + Math.sin(a) * 45);
         g.stroke();
       }
-      g.fillStyle = '#9fe8ff'; g.font = 'bold 11px monospace'; g.textAlign = 'center';
+      g.fillStyle = '#ffe1b8'; g.font = 'bold 11px monospace'; g.textAlign = 'center';
       g.fillText(label, cx, 100);
     };
     gauge(64, 'MPH'); gauge(192, 'RPM');
@@ -103,7 +103,7 @@ export function drawDashTexture(gl, tex, mph, rpm) {
   const gauge = (cx, label, frac) => {
     g.strokeStyle = '#2a2f3a'; g.lineWidth = 5;
     g.beginPath(); g.arc(cx, 64, 46, 0, Math.PI * 2); g.stroke();
-    g.strokeStyle = '#00F0FF'; g.lineWidth = 2;
+    g.strokeStyle = '#ffb36b'; g.lineWidth = 2;
     for (let i = 0; i <= 10; i++) {
       const a = Math.PI * 0.75 + i * Math.PI * 1.5 / 10;
       g.beginPath();
@@ -112,9 +112,9 @@ export function drawDashTexture(gl, tex, mph, rpm) {
       g.stroke();
     }
     const na = Math.PI * 0.75 + Math.min(1, frac) * Math.PI * 1.5;
-    g.strokeStyle = '#FF3355'; g.lineWidth = 3;
+    g.strokeStyle = '#ff7b3c'; g.lineWidth = 3;
     g.beginPath(); g.moveTo(cx, 64); g.lineTo(cx + Math.cos(na) * 40, 64 + Math.sin(na) * 40); g.stroke();
-    g.fillStyle = '#9fe8ff'; g.font = 'bold 11px monospace'; g.textAlign = 'center';
+    g.fillStyle = '#ffe1b8'; g.font = 'bold 11px monospace'; g.textAlign = 'center';
     g.fillText(label, cx, 100);
   };
   gauge(64, 'MPH', mph / 120); gauge(192, 'RPM', rpm);

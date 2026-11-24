@@ -10,13 +10,13 @@ export function drawMinimap(s, mm) {
   mm.clearRect(0, 0, W, W);
   mm.save();
   mm.beginPath(); mm.arc(cx, cy, cx - 2, 0, 7); mm.clip();
-  mm.fillStyle = '#20303c'; mm.fillRect(0, 0, W, W);
+  mm.fillStyle = '#ddd2b8'; mm.fillRect(0, 0, W, W);
   mm.translate(cx, cy);
   mm.rotate(-yaw);
   const scale = 0.55; // px per metre
   mm.scale(scale, scale);
   mm.translate(-s.player.x, -s.player.z);
-  mm.strokeStyle = '#4a6070'; mm.lineWidth = 7;
+  mm.strokeStyle = '#8a7f6d'; mm.lineWidth = 7;
   for (const c of roadCenters()) {
     mm.beginPath(); mm.moveTo(c, -CITY_HALF - 20); mm.lineTo(c, CITY_HALF + 20); mm.stroke();
     mm.beginPath(); mm.moveTo(-CITY_HALF - 20, c); mm.lineTo(CITY_HALF + 20, c); mm.stroke();
@@ -58,7 +58,7 @@ export function updateHUD(s, ui, nearCarFn) {
   ui.speed.textContent = car ? mph(car.speed) + ' MPH' : '';
   ui.banner.style.display = s.bannerT > 0 ? 'block' : 'none';
   ui.banner.textContent = s.banner || '';
-  ui.banner.style.color = s.bannerColor || '#ff4fd8';
+  ui.banner.style.color = s.bannerColor || '#ff7b3c';
   ui.msg.style.display = s.msgT > 0 ? 'block' : 'none';
   ui.msg.textContent = s.msg || '';
   const m = s.mission, tx = s.taxi;
@@ -89,7 +89,7 @@ export function updateHUD(s, ui, nearCarFn) {
   if (ov) {
     ui.overlay.style.display = 'flex';
     ui.ovTitle.textContent = ov[0];
-    ui.ovTitle.style.color = s.mode === 'busted' ? '#6ab0ff' : s.mode === 'wasted' ? '#ff5252' : '#ff4fd8';
+    ui.ovTitle.style.color = s.mode === 'busted' ? '#6ab0ff' : s.mode === 'wasted' ? '#ff5252' : '#ff8c42';
     ui.ovSub.textContent = s.mode === 'busted' ? `Fine paid: $${s.fine || 0} · Click to continue`
       : s.mode === 'wasted' ? 'Hospital bill $150 · Click to continue' : ov[1];
   } else ui.overlay.style.display = 'none';
