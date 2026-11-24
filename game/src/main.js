@@ -6,6 +6,7 @@ import { drawDashTexture } from './gl/textures.js';
 import { clamp, dist2 } from './rng.js';
 import { BLOCK, ROAD, CITY_HALF, roadCenters } from './game/world.js';
 import { createState, step, drainEvents } from './game/state.js';
+import { setupShotScene } from './game/shots.js';
 import { enterExitCar, shoot, respawn } from './game/player.js';
 import { startMission, startTaxi } from './game/missions.js';
 import { CameraRig, viewDir } from './game/camera.js';
@@ -361,59 +362,37 @@ function handleEvents(s) {
 
 // ---------- screenshot scenes (WO Section 4) ----------
 function setupShot(kind) {
-  const s = S, p = s.player;
-  s.mode = 'play';
-  if (kind === 'start') {
-    // On foot on the beach promenade, pistol lowered, skyline across the bay road.
-    s.mode = 'title'; s.hasGun = true;
-    p.x = CITY_HALF - 30; p.z = -38;
-    s.camYaw = -2.32; lookPitch = -0.03; p.ry = s.camYaw;
-    const coupe = s.cars.find(c => c.kind === 'parked');
-    coupe.x = p.x - 12; coupe.z = p.z + 7; coupe.ry = 0.3; coupe.color = [0.95, 0.15, 0.55];
-  }
-  if (kind === 'play') {
-    const car = s.cars.find(c => c.kind === 'parked');
-    car.kind = 'player'; car.x = BLOCK * 0.5 + 3.6; car.z = -60; car.ry = 0;
-    p.inCar = car; p.x = car.x; p.z = car.z;
-    car.rpm = 0.92;
-    rig.fovPunch = 84 * Math.PI / 180;
-    s.cash = 2840; s.armor = 50; s.health = 100;
-    const taxi = s.cars.find(c => c.kind === 'traffic');
-    taxi.x = car.x; taxi.z = car.z + 18; taxi.ry = 0; taxi.color = [0.98, 0.78, 0.15]; taxi.horiz = false;
-    s.mission = { name: 'CRUISE', desc: 'Downtown run', target: { x: car.x, z: car.z + 120, r: 6 } };
-  }
-  if (kind === 'chase') {
-    const car = s.cars.find(c => c.kind === 'parked');
-    car.kind = 'player'; car.x = BLOCK * 0.5; car.z = BLOCK * 0.5; car.ry = 0.9;
-    p.inCar = car; p.x = car.x; p.z = car.z;
-    car.rpm = 0.8; s.wanted = 3; s.trauma = 0.45;
-    const fx = Math.sin(car.ry), fz = Math.cos(car.ry), rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
-    const mkCop = (x, z, ry) => ({ id: 950 + s.cops.length, kind: 'cop', x, z, ry, speed: 12, targetSpeed: 20, hp: 120, smoke: 0, driver: true, stopped: 0, color: [0.95, 0.95, 0.97] });
-    s.cops.push(mkCop(car.x - rx * 2.6 + fx * 0.6, car.z - rz * 2.6 + fz * 0.6, car.ry + 0.15)); // PIT on the left quarter
-    s.cops.push(mkCop(car.x + fx * 17, car.z + fz * 17, car.ry + Math.PI / 2)); // crossing roadblock
-    s.cops.push(mkCop(car.x - fx * 14 + rx * 5, car.z - fz * 14 + rz * 5, car.ry));
-    for (let i = 0; i < 26; i++) spawnP(car.x - fx * 2 + (Math.random() - 0.5) * 2, 0.5, car.z - fz * 2 + (Math.random() - 0.5) * 2, -fx * 2, 1 + Math.random(), -fz * 2, 1.6, 0.9, [0.8, 0.8, 0.85]);
-    for (let i = 0; i < 10; i++) spawnP(car.x - rx * 2.2, 0.8, car.z - rz * 2.2, -rx * 3, 1.5, -rz * 3, 0.5, 0.3, [1, 0.75, 0.25]);
-    skids = [{ x: car.x - fx * 6, z: car.z - fz * 6, ry: car.ry, len: 9 }, { x: car.x - fx * 10, z: car.z - fz * 10, ry: car.ry + 0.2, len: 8 }];
-  }
-  if (kind === 'end') {
-    const z = s.city.zones.spray;
-    p.x = z.x - 10; p.z = z.z + 12;
-    s.camYaw = Math.atan2(z.x - p.x, z.z - p.z); p.ry = s.camYaw; lookPitch = 0.02;
-    s.hasGun = true;
-    const gold = s.cars.find(c => c.kind === 'parked');
-    gold.x = z.x; gold.z = z.z; gold.ry = Math.PI / 2; gold.color = [0.98, 0.8, 0.35];
-    s.pickups.push({ x: z.x + 4, z: z.z + 6, cash: 0, t: 999 });
-    const cop = { id: 977, kind: 'cop', x: z.x + 26, z: z.z - 20, ry: Math.PI, speed: 6, targetSpeed: 12, hp: 120, smoke: 0, driver: true, stopped: 0, color: [0.95, 0.95, 0.97] };
-    s.cops.push(cop);
-    s.banner = 'MISSION PASSED'; s.bannerColor = '#00FFCC'; s.bannerT = 999;
-    s.mission = { name: 'THE RIVAL DEAL', desc: 'REWARD: $20,000', target: null };
-    s.cash = 21450; s.wanted = 0;
-    skids = [{ x: z.x - 6, z: z.z + 2, ry: Math.PI / 2, len: 10 }, { x: z.x - 11, z: z.z + 2.6, ry: Math.PI / 2, len: 8 }];
-    for (let i = 0; i < 8; i++) spawnP(p.x + Math.sin(s.camYaw) * 0.6, 1.5 + i * 0.1, p.z + Math.cos(s.camYaw) * 0.6, 0.2, 0.7, 0.1, 1.4, 0.22, [0.75, 0.75, 0.8]);
+  const s = S;
+  const fx0 = setupShotScene(s, kind);
+  const car = s.player.inCar;
+  void car;
+  if (kind === 'play') rig.fovPunch = 84;
+  lookPitch = kind === 'start' ? -0.03 : 0.02;
+  for (const sk of fx0.skids) skids.push(sk);
+  for (const pf of fx0.puffs) spawnP(pf.x, pf.y, pf.z, pf.vx, pf.vy, pf.vz, pf.life, pf.size, pf.color);
+  if (kind === 'chase') ui.vignette.style.opacity = '0.85';
+}
+
+// ---------- boot ----------
+if (shotMode) {
+  setupShot(shotMode);
+  // Physics objects for shot cars (needs the class; imported statically below).
+  bootPhysics();
+}
+function bootPhysics() {
+  for (const c of S.cars) {
+    if (c === S.player.inCar) {
+      c.phys = new PhysClass();
+      c.phys.u = shotMode === 'play' ? 38.5 : shotMode === 'chase' ? 23.2 : 0;
+      c.phys.steerAngle = shotMode === 'play' ? 0.10 : shotMode === 'chase' ? 0.49 : 0;
+      if (shotMode === 'chase') { c.phys.v = -15.7; c.phys.omega = 0.4; }
+      c.speed = c.phys.u; c.rpm = shotMode === 'play' ? 0.92 : 0.8;
+      c.slip = shotMode === 'chase' ? 14 : 0;
+      c.isDrifting = shotMode === 'chase';
+    }
   }
 }
-// ---------- main loop ----------
+import { VehiclePhysics as PhysClass } from './game/physics.js';
 let lastDt = 1 / 60;
 let last = performance.now(), shotFrames = 0;
 function loop(now) {
@@ -481,26 +460,5 @@ function loop(now) {
     if (shotFrames > 15) window.__shotReady = true;
   }
 }
-
-// ---------- boot ----------
-if (shotMode) {
-  setupShot(shotMode);
-  // Physics objects for shot cars (needs the class; imported statically below).
-  bootPhysics();
-}
-function bootPhysics() {
-  for (const c of S.cars) {
-    if (c === S.player.inCar) {
-      c.phys = new PhysClass();
-      c.phys.u = shotMode === 'play' ? 38.5 : shotMode === 'chase' ? 23.2 : 0;
-      c.phys.steerAngle = shotMode === 'play' ? 0.10 : shotMode === 'chase' ? 0.49 : 0;
-      if (shotMode === 'chase') { c.phys.v = -15.7; c.phys.omega = 0.4; }
-      c.speed = c.phys.u; c.rpm = shotMode === 'play' ? 0.92 : 0.8;
-      c.slip = shotMode === 'chase' ? 14 : 0;
-      c.isDrifting = shotMode === 'chase';
-    }
-  }
-}
-import { VehiclePhysics as PhysClass } from './game/physics.js';
 requestAnimationFrame(loop);
 console.log('Vice Blocks 3D booted', shotMode ? `(shot=${shotMode} seed=${seedParam})` : '');

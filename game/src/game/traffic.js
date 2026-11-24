@@ -78,6 +78,28 @@ export function stepTrafficCar(s, c, dt) {
   else c.x += clamp((near + (c.ry > Math.PI / 2 || c.ry < -Math.PI / 2 ? -3.6 : 3.6)) - c.x, -3 * dt, 3 * dt);
 }
 
+// Teleport a traffic car onto a lane 28-65 m from the player (density recycling).
+export function placeCarNear(s, car, rng) {
+  const centers = roadCenters();
+  const p = s.player;
+  const heading = p.inCar ? p.inCar.ry : p.ry;
+  const fx = Math.sin(heading), fz = Math.cos(heading);
+  const horiz = rng.chance(0.5);
+  let road = centers[0], bd = 1e18;
+  for (const c of centers) { const d = Math.abs((horiz ? p.z : p.x) - c); if (d < bd) { bd = d; road = c; } }
+  const dir = rng.chance(0.65) ? 1 : -1;
+  const ahead = rng.range(22, 48);
+  const along = clamp((horiz ? p.x : p.z) + (fx * ahead) * dir, -CITY_HALF + 8, CITY_HALF - 8);
+  const lane = road + dir * 3.6;
+  car.horiz = horiz; car.road = road; car.dir = dir;
+  car.x = horiz ? along : lane;
+  car.z = horiz ? lane : along;
+  car.ry = horiz ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (dir > 0 ? 0 : Math.PI);
+  car.speed = car.targetSpeed * 0.7;
+  void fx; void fz;
+  return car;
+}
+
 export function damageCar(s, car, dmg) {
   car.hp -= dmg;
   car.smoke = car.hp < 55 ? (car.hp < 25 ? 2 : 1) : 0;

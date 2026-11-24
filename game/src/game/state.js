@@ -2,8 +2,8 @@
 // no WebGL — safe to run headless in Node for smoke tests.
 import { makeRng, clamp, dist2 } from '../rng.js';
 import { genCity, BLOCK } from './world.js';
-import { spawnTraffic, spawnParked, stepTrafficCar } from './traffic.js';
-import { spawnPed, stepPed } from './pedestrians.js';
+import { spawnTraffic, spawnParked, stepTrafficCar, placeCarNear } from './traffic.js';
+import { spawnPed, stepPed, placePedNear } from './pedestrians.js';
 import * as wanted from './wanted.js';
 import * as player from './player.js';
 import { stepMissions, startMission } from './missions.js';
@@ -26,7 +26,7 @@ export function createState(seed, saved) {
   s.wantedAPI = { add: wanted.addWanted };
   s.playerAPI = { hurt: player.hurt };
   s.cars = [...spawnTraffic(rng, 16), ...spawnParked(rng, 10)];
-  for (let i = 0; i < 36; i++) s.peds.push(spawnPed(s, rng));
+  for (let i = 0; i < 30; i++) s.peds.push(spawnPed(s, rng));
   if (saved) {
     if (typeof saved.cash === 'number') s.cash = saved.cash;
     if (typeof saved.missionIdx === 'number') s.missionIdx = clamp(saved.missionIdx, 0, 5);
@@ -37,6 +37,29 @@ export function createState(seed, saved) {
 }
 
 export function drainEvents(s) { const e = s.events; s.events = []; return e; }
+
+// Density management: keep the player's neighbourhood alive — at least ~5
+// peds and ~4 traffic cars within 60 m; far entities are recycled nearby.
+export function manageDensity(s) {
+  const p = s.player;
+  let nearPeds = 0;
+  const farPeds = [];
+  for (const ped of s.peds) {
+    const d2 = dist2(ped.x, ped.z, p.x, p.z);
+    if (d2 < 60 * 60) nearPeds++;
+    else if (d2 > 95 * 95 && ped.state === 'walk') farPeds.push(ped);
+  }
+  for (let i = 0; nearPeds < 5 && i < farPeds.length; i++, nearPeds++) placePedNear(s, farPeds[i], s.rng);
+  let nearCars = 0;
+  const farCars = [];
+  for (const c of s.cars) {
+    if (c.kind !== 'traffic') continue;
+    const d2 = dist2(c.x, c.z, p.x, p.z);
+    if (d2 < 60 * 60) nearCars++;
+    else if (d2 > 100 * 100) farCars.push(c);
+  }
+  for (let i = 0; nearCars < 4 && i < farCars.length; i++, nearCars++) placeCarNear(s, farCars[i], s.rng);
+}
 
 export function step(s, input, dt) {
   s.time += dt;
@@ -66,7 +89,9 @@ export function step(s, input, dt) {
   for (const c of s.cars) if (c !== p.inCar && (c.kind === 'traffic')) stepTrafficCar(s, c, dt);
   for (const ped of s.peds) stepPed(s, ped, dt);
   s.peds = s.peds.filter(ped => ped.state !== 'dead' || ped.t > -6);
-  while (s.peds.length < 30) s.peds.push(spawnPed(s, s.rng));
+  while (s.peds.length < 28) s.peds.push(spawnPed(s, s.rng));
+  s.densityT = (s.densityT || 0) - dt;
+  if (s.densityT <= 0) { s.densityT = 0.6; manageDensity(s); }
   wanted.stepWanted(s, dt);
   stepMissions(s, dt);
   // Contact respawn of traffic far away keeps the city alive.
