@@ -30,7 +30,11 @@ export function drawMinimap(s, mm) {
   mm.fillStyle = '#ffffff';
   mm.fillRect(z.hospital.x - 4.5, z.hospital.z - 1.5, 9, 3);
   mm.fillRect(z.hospital.x - 1.5, z.hospital.z - 4.5, 3, 9);
-  for (const c of s.cops) if (c.kind === 'cop') dot(c.x, c.z, Math.floor(s.time * 3) % 2 ? '#ff4040' : '#4080ff', 3.4);
+  for (const c of s.cops) if (c.kind === 'cop') {
+    if (c.roadblock) { mm.fillStyle = '#ff9020'; mm.fillRect(c.x - 4, c.z - 4, 8, 8); }
+    else dot(c.x, c.z, Math.floor(s.time * 3) % 2 ? '#ff4040' : '#4080ff', 3.4);
+  }
+  if (s.heli) dot(s.heli.x, s.heli.z, '#ffffff', 3.2);
   for (const c of s.cars) if (c.kind === 'traffic') dot(c.x, c.z, '#c8c8c8', 1.8);
   for (const pk of s.pickups) dot(pk.x, pk.z, '#3dff7a', 3);
   const target = s.mission?.target || s.taxi?.target;
@@ -53,8 +57,13 @@ export function updateHUD(s, ui, nearCarFn) {
   ui.stars.style.color = s.wanted ? '#FFD700' : '#2A2A38';
   ui.stars.style.textShadow = s.wanted ? '0 0 10px rgba(255,215,0,.9)' : 'none';
   const car = s.player.inCar;
-  ui.weapon.textContent = car ? `GEAR ${car.gear === 0 ? 'R' : car.gear} · ${car.isDrifting ? 'DRIFT!' : ''}`
-    : (s.hasGun ? `PISTOL ${s.ammo} / ${s.reserve}${s.reloadT > 0 ? ' · RELOADING' : ''}` : 'UNARMED');
+  ui.weapon.textContent = car ? `GEAR ${car.gear === 0 ? 'R' : car.gear} · ${car.isDrifting ? 'DRIFT!' : ''}${s.radio ? ` · RADIO ${s.radio === 1 ? 'VICE FM' : 'SOLMAR'}` : ''}`
+    : (s.hasGun ? (s.weapon === 'smg' && s.hasSmg ? `SMG ${s.ammoSmg} / ${s.reserve}` : `PISTOL ${s.ammo} / ${s.reserve}`) + (s.reloadT > 0 ? ' · RELOADING' : '') : 'UNARMED');
+  if (ui.respectfill) {
+    const r = s.respect || 0;
+    ui.respectfill.style.width = Math.min(100, (r % 300) / 3) + '%';
+    ui.rank.textContent = 'RESPECT · ' + (r >= 700 ? 'KINGPIN' : r >= 300 ? 'OPERATOR' : 'RUNNER');
+  }
   ui.speed.textContent = car ? mph(car.speed) + ' MPH' : '';
   ui.banner.style.display = s.bannerT > 0 ? 'block' : 'none';
   ui.banner.textContent = s.banner || '';

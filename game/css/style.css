@@ -36,3 +36,6 @@ body::after {
 #ovTitle { font-size: 74px; font-weight: 900; font-style: italic; letter-spacing: 2px; color: #ffffff; text-shadow: 0 4px 0 rgba(70,35,0,.55), 0 0 44px rgba(255,150,70,.8), 3px 3px 0 #ff8c42; animation: bannerPulse 1.2s ease-in-out infinite alternate; }
 #ovSub { margin-top: 14px; font-size: 20px; color: #ffe9a8; text-shadow: 0 1px 0 #000; letter-spacing: 2px; }
 #help { position: fixed; left: 18px; bottom: 200px; font-size: 13px; line-height: 1.65; color: rgba(255,255,255,.62); text-shadow: 0 1px 0 #000; z-index: 15; pointer-events: none; }
+#respectWrap { position: absolute; top: 52px; right: 20px; width: 150px; height: 7px; background: rgba(10,6,16,.55); border: 1px solid rgba(255,255,255,.4); }
+#respectfill { height: 100%; width: 0%; background: linear-gradient(90deg, #ffb36b, #ff7b3c); }
+#rank { position: absolute; top: 63px; right: 20px; font-size: 11.5px; font-weight: 700; letter-spacing: 1.5px; color: #ffffff; text-shadow: 0 1px 0 rgba(0,0,0,.6); }

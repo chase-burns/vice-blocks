@@ -61,7 +61,7 @@ export class VehiclePhysics {
     const torque = band[2] * SPEC.finalDrive;
     let Fx = 0;
     this.throttle = input.throttle || 0;
-    if (this.shiftDip <= 0) Fx += this.throttle * torque;
+    if (this.shiftDip <= 0) Fx += this.throttle * torque * (this.powerMul || 1);
     if (input.brake) Fx += this.u > 0.4 ? -SPEC.brakeForce : (this.u > -10 ? -2600 * SPEC.finalDrive * 0.45 : 0);
     // --- Handbrake (spec 3.5)
     const hb = !!input.handbrake;

@@ -60,6 +60,35 @@ export class AudioEngine {
     const copsNear = s.cops.some(c => c.kind === 'cop');
     this.sirenGain.gain.value = copsNear && s.mode === 'play' ? 0.02 : 0;
     if (this.sirenOsc) this.sirenOsc.frequency.value = (Math.floor(s.time * 1.6) % 2 === 0) ? 650 : 920;
+    this._radio(s);
+  }
+  // Procedural radio: two stations, step-sequenced bass + sparse lead.
+  _radio(s) {
+    const on = s.radio > 0 && s.player.inCar && s.mode === 'play';
+    if (!on) { this._radioT = 0; return; }
+    const AC = this.ac;
+    this._radioT = (this._radioT || 0) + 1 / 60;
+    const stepDur = s.radio === 1 ? 0.21 : 0.30;
+    if (this._radioT < stepDur) return;
+    this._radioT = 0;
+    this._radioStep = ((this._radioStep || 0) + 1) % 32;
+    const i = this._radioStep;
+    const bass1 = [55, 0, 55, 55, 0, 55, 0, 65.4, 55, 0, 55, 55, 0, 82.4, 0, 73.4];
+    const bass2 = [65.4, 0, 0, 65.4, 0, 0, 49, 0, 58.3, 0, 0, 58.3, 0, 73.4, 0, 0];
+    const lead1 = [220, 0, 261.6, 0, 329.6, 0, 261.6, 0, 293.7, 0, 0, 220, 0, 196, 0, 0, 220, 0, 261.6, 0, 392, 0, 329.6, 0, 293.7, 0, 261.6, 0, 0, 0, 0, 0];
+    const lead2 = [174.6, 0, 0, 220, 0, 0, 261.6, 0, 0, 0, 220, 0, 196, 0, 0, 0, 174.6, 0, 0, 220, 0, 0, 293.7, 0, 261.6, 0, 0, 220, 0, 0, 0, 0];
+    const bass = (s.radio === 1 ? bass1 : bass2)[i % 16];
+    const lead = (s.radio === 1 ? lead1 : lead2)[i];
+    const note = (freq, dur, type, vol) => {
+      if (!freq) return;
+      const o = AC.createOscillator(), g = AC.createGain();
+      o.type = type; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol, AC.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime + dur);
+      o.connect(g); g.connect(AC.destination); o.start(); o.stop(AC.currentTime + dur);
+    };
+    note(bass, stepDur * 0.95, 'triangle', 0.16);
+    note(lead, stepDur * 1.4, 'square', 0.045);
   }
   beep(freq, dur, type = 'square', vol = 0.12, slide = 0) {
     if (!this.ok) return;

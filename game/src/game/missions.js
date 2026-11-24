@@ -10,6 +10,9 @@ export const MISSIONS = [
   { name: 'AMMU-NATION RUN', desc: 'Buy the 9mm pistol ($300), then drop 5 range targets.', pay: 400 },
   { name: 'THE RIVAL DEAL', desc: 'Hold up the rival boss at the harbor and take his briefcase.', pay: 2000 },
   { name: 'VICE ESCAPE', desc: 'Survive the 4-star heat for 3 minutes, then reach the Pay \'n Spray.', pay: 1500 },
+  { name: 'PALM TREE GRAND PRIX', desc: 'Rico\'s midnight circuit on Solmar Bay: hit 5 checkpoints against the clock.', pay: 900, time: 80 },
+  { name: 'ROADBLOCK RUN', desc: 'Marisol\'s cargo has to cross town. Punch through the heat, hit the marks, reach the hideout.', pay: 1200 },
+  { name: 'NIGHT COURIER', desc: 'Uncle Bao\'s package, delivered quietly. Heat makes the clock bleed — stay invisible.', pay: 1100, time: 100 },
 ];
 function randomCorner(s) {
   const c = roadCenters();
@@ -37,6 +40,9 @@ export function startMission(s) {
     s.boss = { x: s.city.zones.harbor.x + 3, z: s.city.zones.harbor.z + 2, aimTime: 0, done: false };
   }
   if (m.idx === 4) { s.wantedAPI.add(s, 4, true); m.surviveT = 180; m.target = null; }
+  if (m.idx === 5) m.target = randomCorner(s);
+  if (m.idx === 6) { s.wantedAPI.add(s, 4, true); m.target = randomCorner(s); }
+  if (m.idx === 7) m.target = randomCorner(s);
   s.mission = m;
   s.banner = m.name; s.bannerT = 3.2;
   s.events.push({ name: 'banner', data: m.name });
@@ -48,6 +54,7 @@ export function startTaxi(s) {
 }
 function completeMission(s, pay, label) {
   s.cash += pay; s.stats.earned += pay;
+  if (s.mission) { s.respect += 100; s.events.push({ name: 'respect', data: s.respect }); }
   s.events.push({ name: 'cash', data: pay });
   s.events.push({ name: 'missionDone', data: label || s.mission?.name || 'TAXI' });
   s.banner = pay > 0 ? `MISSION PASSED  +$${pay}` : 'MISSION PASSED';
@@ -118,6 +125,25 @@ export function stepMissions(s, dt) {
       }
       if (m.target && s.wanted === 0 && dist2(p.x, p.z, m.target.x, m.target.z) < m.target.r * m.target.r + 40) completeMission(s, m.pay);
       if (s.mode !== 'play') return; // busted/wasted handled by shell
+    } else if (m.idx === 5) {
+      // Street race: 5 sequential checkpoints against the clock.
+      if (near && p.inCar) {
+        m.phase++;
+        if (m.phase >= 5) completeMission(s, m.pay);
+        else { m.target = randomCorner(s); s.banner = `CHECKPOINT ${m.phase + 1} / 5`; s.bannerT = 1.6; s.events.push({ name: 'pickup' }); }
+      }
+    } else if (m.idx === 6) {
+      // Roadblock run: 2 marks under 4-star heat, then the hideout.
+      if (near && p.inCar) {
+        m.phase++;
+        if (m.phase === 1) { m.target = randomCorner(s); s.banner = 'ONE MORE MARK — STAY AHEAD OF THEM'; s.bannerT = 2; s.events.push({ name: 'pickup' }); }
+        else if (m.phase === 2) { m.target = { ...s.city.zones.harbor }; s.banner = 'NOW THE HIDEOUT AT THE HARBOR'; s.bannerT = 2; }
+        else completeMission(s, m.pay);
+      }
+    } else if (m.idx === 7) {
+      // Night courier: heat makes the clock bleed twice as fast.
+      if (s.wanted >= 2) { m.timer -= dt; s.msg = 'TOO HOT — THE CLOCK IS BLEEDING'; s.msgT = 0.4; }
+      if (near && p.inCar) completeMission(s, m.pay);
     }
   }
   const tx = s.taxi;

@@ -59,12 +59,22 @@ export function setupShotScene(s, kind) {
     const car = s.cars.find(c => c.kind === 'parked');
     car.kind = 'player'; car.x = BLOCK * 0.5; car.z = BLOCK * 0.5; car.ry = 0.9;
     p.inCar = car; p.x = car.x; p.z = car.z;
-    car.rpm = 0.8; s.wanted = 3; s.trauma = 0.45;
+    car.rpm = 0.8; s.wanted = 4; s.trauma = 0.45;
     const fx = Math.sin(car.ry), fz = Math.cos(car.ry), rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
     const mkCop = (x, z, ry) => ({ id: 950 + s.cops.length, kind: 'cop', x, z, ry, speed: 12, targetSpeed: 20, hp: 120, smoke: 0, driver: true, stopped: 0, color: [0.95, 0.95, 0.97] });
     s.cops.push(mkCop(car.x - rx * 2.6 + fx * 0.6, car.z - rz * 2.6 + fz * 0.6, car.ry + 0.15));
-    s.cops.push(mkCop(car.x + fx * 17, car.z + fz * 17, car.ry + Math.PI / 2));
     s.cops.push(mkCop(car.x - fx * 14 + rx * 5, car.z - fz * 14 + rz * 5, car.ry));
+    // 4-star roadblock: two cruisers side by side across the road ahead.
+    for (const sd of [-2.3, 2.3]) {
+      const rb = mkCop(car.x + fx * 19 + rx * sd, car.z + fz * 19 + rz * sd, car.ry + Math.PI / 2);
+      rb.roadblock = true; rb.speed = 0;
+      s.cops.push(rb);
+    }
+    // Air unit overhead, spotlight locked on the player car (staged for frame).
+    s.heli = { a: 0, h: 17, x: car.x + fx * 26 - rx * 10, z: car.z + fz * 26 - rz * 10 };
+    // A burning wreck by the roadside for the explosion chain money-shot.
+    const wreck = placeTrafficAt(s, 3, car.x + fx * 12 + rx * 9, car.z + fz * 12 + rz * 9, car.ry + 0.7, [0.3, 0.3, 0.34]);
+    wreck.burning = 1.4; wreck.hp = 0;
     // Bystander traffic + fleeing peds at the intersection corners.
     placeTrafficAt(s, 0, car.x + fx * 26 - rx * 8, car.z + fz * 26 - rz * 8, car.ry + Math.PI / 2, [0.98, 0.78, 0.15]);
     placeTrafficAt(s, 1, car.x - fx * 10 + rx * 10, car.z - fz * 10 + rz * 10, car.ry, [0.4, 0.7, 0.4]);

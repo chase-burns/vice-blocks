@@ -17,7 +17,7 @@ import { loadProfile, saveProfile } from './game/storage.js';
 const canvas = document.getElementById('gl');
 const R = new Renderer(canvas);
 const ui = {};
-for (const id of ['hud','health','armor','cash','stars','weapon','banner','msg','minimap','speed','bustbar','bustfill','overlay','ovTitle','ovSub','mission','timer','prompt','vignette'])
+for (const id of ['hud','health','armor','cash','stars','weapon','banner','msg','minimap','speed','bustbar','bustfill','overlay','ovTitle','ovSub','mission','timer','prompt','vignette','respectfill','rank'])
   ui[id] = document.getElementById(id);
 const mm = ui.minimap.getContext('2d');
 
@@ -315,6 +315,32 @@ function drawPerson(s, x, z, ry, color, o = {}) {
   if (o.gun) R.box(x + fx * 0.4, 1.25, z + fz * 0.4, ry, 0.08, 0.12, 0.45, [0.08, 0.08, 0.1]);
 }
 
+// Police helicopter: fuselage, tail boom, spinning rotors, spotlight cone
+// locked onto the player with a bright pool on the ground.
+function drawHeli(s, t) {
+  const h = s.heli, p = s.player;
+  const x = h.x, z = h.z, y = h.h || 28;
+  const ry = Math.atan2(p.x - x, p.z - z);
+  R.box(x, y, z, ry, 2.2, 1.9, 5.2, [0.92, 0.92, 0.95]);
+  R.box(x, y + 0.2, z, ry, 1.9, 1.0, 1.8, [0.15, 0.2, 0.3]);
+  const bx = Math.sin(ry), bz = Math.cos(ry);
+  R.box(x - bx * 4.6, y + 0.5, z - bz * 4.6, ry, 0.5, 0.7, 4.4, [0.85, 0.85, 0.88]);
+  R.box(x - bx * 6.7, y + 0.9, z - bz * 6.7, ry, 0.18, 1.5, 1.1, [0.85, 0.85, 0.88]);
+  const spin = t * 42;
+  R.box(x, y + 1.25, z, spin, 11.5, 0.08, 0.5, [0.2, 0.2, 0.24]);
+  R.box(x, y + 1.25, z, spin + Math.PI / 2, 11.5, 0.08, 0.5, [0.2, 0.2, 0.24], { alpha: 0.7 });
+  R.box(x - bx * 6.7, y + 0.9, z - bz * 6.7, ry, 1.6, 0.12, 0.3, [0.2, 0.2, 0.24], { roll: t * 55 });
+  R.box(x - bx * 1.4, y - 1.25, z - bz * 1.4, ry, 2.6, 0.16, 0.3, [0.3, 0.3, 0.34]);
+  // spotlight: beam from belly to the player + pool on the ground
+  const dx = p.x - x, dz = p.z - z;
+  const dist = Math.hypot(dx, dz, y);
+  const myaw = Math.atan2(dx, dz);
+  const mpitch = Math.atan2(Math.hypot(dx, dz), y);
+  R.box((x + p.x) / 2, y / 2 + 0.5, (z + p.z) / 2, myaw, 1.5, dist, 1.5, [1, 0.98, 0.85], { alpha: 0.13, pitch: -mpitch });
+  R.box(p.x, 0.22, p.z, 0, 7.5, 0.06, 7.5, [1, 0.98, 0.85], { alpha: 0.30 });
+  R.box(p.x, 0.24, p.z, 0, 4.2, 0.06, 4.2, [1, 1, 0.95], { alpha: 0.35 });
+}
+
 // ---------- render ----------
 let frame = 0;
 function render(s, t) {
@@ -350,6 +376,14 @@ function render(s, t) {
   drawSkids();
   for (const c of s.cars) drawCar(s, c, t, c === p.inCar);
   for (const c of s.cops) if (c !== p.inCar) drawCar(s, c, t);
+  if (s.heli) drawHeli(s, t);
+  // Burning cars throw flame particles before they blow.
+  for (const c of [...s.cars, ...s.cops]) {
+    if (c.burning > 0) {
+      spawnP(c.x, 1.1, c.z, (Math.random() - 0.5) * 1.4, 2.4 + Math.random() * 1.6, (Math.random() - 0.5) * 1.4, 0.5, 0.75, [1, 0.5, 0.12]);
+      spawnP(c.x, 1.3, c.z, 0, 1.8, 0, 0.8, 0.9, [0.3, 0.28, 0.3]);
+    }
+  }
   for (const ped of s.peds) {
     ped._phase = (ped._phase || 0) + (ped.state === 'dead' ? 0 : (ped.state === 'flee' ? 11 : 6) * lastDt * (ped.speed / 1.4));
     drawPerson(s, ped.x, ped.z, ped.ry, ped.color, { walkPhase: ped._phase, dead: ped.state === 'dead', handsUp: ped.state === 'handsup' || ped.state === 'robbed', pants: ped.pants, skin: ped.skin });
@@ -377,7 +411,12 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyF') wantEnter = true;
   if (e.code === 'KeyE') wantInteract = true;
   if (e.code === 'KeyT') wantTaxi = true;
-  if (e.code === 'KeyR') wantReload = true;
+  if (e.code === 'KeyR') {
+    if (S.player.inCar) { S.radio = (S.radio + 1) % 3; S.msg = S.radio === 0 ? 'RADIO OFF' : S.radio === 1 ? 'RADIO · VICE FM' : 'RADIO · SOLMAR'; S.msgT = 1.6; }
+    else wantReload = true;
+  }
+  if (e.code === 'Digit1' && S.hasGun) S.weapon = 'pistol';
+  if (e.code === 'Digit2' && S.hasSmg) S.weapon = 'smg';
   if (e.code === 'KeyP' || e.code === 'Escape') {
     if (S.mode === 'play') S.mode = 'paused';
     else if (S.mode === 'paused') S.mode = 'play';
@@ -431,7 +470,15 @@ function handleEvents(s) {
       case 'dryFire': audio.beep(200, 0.05, 'square', 0.08); s.msg = 'EMPTY — R TO RELOAD'; s.msgT = 1.2; break;
       case 'hitPed': audio.noiseBurst(0.15, 0.3, 500); break;
       case 'crash': case 'ram': audio.crash(e.data || 8); break;
-      case 'explode': audio.noiseBurst(0.8, 0.7, 220); break;
+      case 'explode': {
+        audio.noiseBurst(0.8, 0.7, 220);
+        const { x, z } = e.data || s.player;
+        for (let i = 0; i < 30; i++) spawnP(x, 1 + Math.random(), z, (Math.random() - 0.5) * 9, 2 + Math.random() * 5, (Math.random() - 0.5) * 9, 0.7 + Math.random() * 0.5, 1.1, i % 3 ? [1, 0.55, 0.15] : [0.35, 0.3, 0.3]);
+        break;
+      }
+      case 'roadblockHit': audio.crash(14); s.msg = 'ROADBLOCK SMASHED'; s.msgT = 1.6; break;
+      case 'heli': s.msg = 'AIR UNIT INBOUND'; s.msgT = 2; break;
+      case 'carFire': break;
       case 'cash': case 'pickup': case 'missionDone': audio.cash(); break;
       case 'robDrop': s.msg = 'WALLET DROPPED — GRAB IT'; s.msgT = 2; break;
       case 'buyGun': audio.cash(); s.msg = 'PISTOL PURCHASED — RIGHT MOUSE AIM, LEFT CLICK FIRE'; s.msgT = 3; break;
@@ -501,7 +548,9 @@ function loop(now) {
       if (wantEnter) { enterExitCar(S); wantEnter = false; }
       if (wantTaxi) { startTaxi(S); wantTaxi = false; }
       const input = readInput();
-      if (wantShoot && !S.player.inCar) { shoot(S); }
+      if (!S.player.inCar && (wantShoot || (mouseDownL && S.weapon === 'smg' && S.hasSmg))) {
+        if ((S.fireCd || 0) <= 0) { shoot(S); S.fireCd = S.weapon === 'smg' ? 0.09 : 0.25; }
+      }
       step(S, input, dt);
       // skid marks while drifting
       const pc = S.player.inCar;

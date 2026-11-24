@@ -34,6 +34,7 @@ export function enterExitCar(s) {
     if (d < bd) { bd = d; best = c; }
   }
   if (best) {
+    best.hpMax = s.armorUp ? 150 : 100; // garage armour upgrade raises the cap
     if (!best.phys) best.phys = new VehiclePhysics();
     best.phys.u = best.speed || 0; best.phys.v = 0; best.phys.omega = 0;
     p.inCar = best;
@@ -49,8 +50,12 @@ export function enterExitCar(s) {
 
 export function shoot(s) {
   const p = s.player;
-  if (!s.hasGun || p.inCar || s.ammo <= 0) { if (s.ammo <= 0 && s.hasGun) s.events.push({ name: 'dryFire' }); return; }
-  s.ammo--;
+  const smg = s.weapon === 'smg' && s.hasSmg;
+  const magKey = smg ? 'ammoSmg' : 'ammo';
+  if (!s.hasGun || p.inCar || s[magKey] <= 0) { if (s[magKey] <= 0 && s.hasGun) s.events.push({ name: 'dryFire' }); return; }
+  s[magKey]--;
+  const spread = smg ? 2.8 : 1.2;   // SMG: full-auto scatter
+  const carDmg = smg ? 9 : 18;
   s.recoil = 1; // viewmodel slide kick, spring recovery in camera/render
   s.gunfireT = 0.6; s.gunfireX = p.x; s.gunfireZ = p.z;
   s.events.push({ name: 'shot' });
@@ -59,7 +64,7 @@ export function shoot(s) {
   for (const ped of s.peds) {
     const dx = ped.x - p.x, dz = ped.z - p.z;
     const along = dx * fx + dz * fz;
-    if (along > 0 && along < hd && Math.abs(dx * fz - dz * fx) < 1.2) { hit = ped; hd = along; }
+    if (along > 0 && along < hd && Math.abs(dx * fz - dz * fx) < spread) { hit = ped; hd = along; }
   }
   // Mission training targets (Ammu-Nation Run).
   for (const tg of s.targets || []) {
@@ -80,7 +85,7 @@ export function shoot(s) {
     const dx = c.x - p.x, dz = c.z - p.z;
     const along = dx * fx + dz * fz;
     if (along > 0 && along < 42 && Math.abs(dx * fz - dz * fx) < 2.2) {
-      damageCar(s, c, 18);
+      damageCar(s, c, carDmg);
       if (c.kind === 'cop') s.wantedAPI.add(s, Math.max(3, s.wanted), true);
       return;
     }
@@ -137,6 +142,30 @@ export function stepPlayerCar(s, input, dt) {
     s.trauma = Math.min(1, (s.trauma || 0) + impactDv / 15);
   }
   p.x = car.x; p.z = car.z; p.ry = car.ry;
+  // Car-to-car contact: traffic gives way with damage; roadblock cruisers
+  // can be punched through (shoved aside, spun, line broken).
+  for (const o of [...s.cars, ...s.cops]) {
+    if (o === car || o.kind === 'dead') continue;
+    const d2o = dist2(o.x, o.z, car.x, car.z);
+    if (d2o < 3.1 * 3.1 && car.velSpeed > 2) {
+      const dx = o.x - car.x, dz = o.z - car.z;
+      const dl = Math.hypot(dx, dz) || 1;
+      if (o.roadblock) {
+        o.roadblock = false;
+        o.x += (dx / dl) * 2.4 + (dz / dl) * 1.2; o.z += (dz / dl) * 2.4 - (dx / dl) * 1.2;
+        o.ry += 0.9; o.speed = 3;
+        damageCar(s, o, 30); damageCar(s, car, 10);
+        s.trauma = Math.min(1, (s.trauma || 0) + 0.3);
+        s.events.push({ name: 'roadblockHit', data: o });
+        s.wantedAPI.add(s, Math.max(4, s.wanted), true);
+      } else {
+        o.x += (dx / dl) * 0.9; o.z += (dz / dl) * 0.9;
+        damageCar(s, o, 8); damageCar(s, car, 5);
+        phys.u *= 0.82;
+      }
+    }
+  }
+  phys.powerMul = s.engineUp ? 1.15 : 1;
   for (const ped of s.peds) {
     if (ped.state !== 'dead' && car.velSpeed > 5 && dist2(ped.x, ped.z, car.x, car.z) < 2.3 * 2.3) {
       ped.state = 'dead'; ped.t = 5;
@@ -177,6 +206,8 @@ export function stepPlayerFoot(s, input, dt) {
   if (inZone(zones.gunshop) && input.interact) {
     if (!s.hasGun && s.cash >= 300) { s.cash -= 300; s.hasGun = true; s.ammo = 12; s.events.push({ name: 'buyGun' }); s.events.push({ name: 'save' }); }
     else if (!s.hasGun) { s.msg = 'PISTOL $300 — NOT ENOUGH CASH'; s.msgT = 2; }
+    else if (!s.hasSmg && s.cash >= 600) { s.cash -= 600; s.hasSmg = true; s.ammoSmg = 30; s.weapon = 'smg'; s.msg = 'SMG PURCHASED — KEYS 1/2 SWITCH'; s.msgT = 2.5; s.events.push({ name: 'buyGun' }); s.events.push({ name: 'save' }); }
+    else if (!s.hasSmg) { s.msg = 'SMG $600 — NOT ENOUGH CASH'; s.msgT = 2; }
     else if (s.reserve < 240) { s.reserve = 240; s.msg = 'AMMO RESTOCKED'; s.msgT = 1.5; }
   }
   if (inZone(zones.hospital) && s.health < 100) s.health = Math.min(100, s.health + 22 * dt);
@@ -201,14 +232,23 @@ export function stepZonesCar(s, dt) {
   if (!car) return;
   const z = s.city.zones.spray;
   if (dist2(p.x, p.z, z.x, z.z) < z.r * z.r) {
+    const hpCap = car.hpMax || 100;
     if (s.wanted > 0 && s.cash >= 100) {
       s.cash -= 100; s.wanted = 0; s.crimeHeat = 0; s.pendingStars = null;
       s.cops = s.cops.filter(c => c === car);
-      car.hp = 100; car.smoke = 0;
+      car.hp = hpCap; car.smoke = 0; car.burning = null;
       car.color = [s.rng.range(0.3, 1), s.rng.range(0.3, 1), s.rng.range(0.3, 1)];
       s.events.push({ name: 'spray' }); s.events.push({ name: 'save' });
-    } else if (car.hp < 100 && s.cash >= 100) {
-      s.cash -= 100; car.hp = 100; car.smoke = 0; s.events.push({ name: 'spray' });
+    } else if (car.hp < hpCap && s.cash >= 100) {
+      s.cash -= 100; car.hp = hpCap; car.smoke = 0; car.burning = null; s.events.push({ name: 'spray' });
+    } else if (!s.armorUp && s.cash >= 400) {
+      s.cash -= 400; s.armorUp = true; car.hpMax = 150;
+      s.msg = 'ARMOUR FITTED — HULL +50% ($400)'; s.msgT = 2.5;
+      s.events.push({ name: 'spray' }); s.events.push({ name: 'save' });
+    } else if (!s.engineUp && s.cash >= 500) {
+      s.cash -= 500; s.engineUp = true;
+      s.msg = 'ENGINE TUNED — TOP SPEED +15% ($500)'; s.msgT = 2.5;
+      s.events.push({ name: 'spray' }); s.events.push({ name: 'save' });
     }
   }
 }
