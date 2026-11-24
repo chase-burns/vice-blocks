@@ -1,73 +1,113 @@
-// First-person dual camera (WO Task 6): cockpit rig with spring lag, FOV
-// punch and trauma shake; on-foot rig with head bob. Pure math, no DOM.
+// camera.js — the two first-person rigs. The cockpit rig anchors at the
+// driver's eye, inherits chassis pitch/roll through soft springs, widens
+// its field of view under acceleration, rolls a few degrees against the
+// steering at speed, and shakes with an amplitude proportional to trauma
+// squared. The foot rig is a head-bobbing eye at 1.72 m. Pure math.
 import { clamp } from '../rng.js';
 
 export function viewDir(yaw, pitch) {
   const cp = Math.cos(pitch);
   return [Math.sin(yaw) * cp, -Math.sin(pitch), Math.cos(yaw) * cp];
 }
-function noise1(t, seed) { return Math.sin(t * 31.7 + seed) * 0.6 + Math.sin(t * 57.3 + seed * 2.1) * 0.4; }
+
+// Cheap two-sine pseudo-noise for camera shake.
+function shakeNoise(t, seed) {
+  return Math.sin(t * 31.7 + seed) * 0.6 + Math.sin(t * 57.3 + seed * 2.1) * 0.4;
+}
+
+const BASE_FOV = 75 * Math.PI / 180;
 
 export class CameraRig {
   constructor() {
-    this.eye = null; this.center = null;
-    this.springP = 0; this.springPV = 0; this.springR = 0; this.springRV = 0;
+    this.eye = null;
+    this.center = null;
+    this._springPitch = 0;
+    this._springPitchVel = 0;
+    this._springRoll = 0;
+    this._springRollVel = 0;
     this.fovPunch = 0;
   }
-  // 2-pole spring (k=18, c=2.4 per spec, scaled for stability at 60 Hz)
-  _spring(cur, vel, target, dt) {
-    const k = 18, c = 2.4;
-    const acc = k * (target - cur) - c * vel * 6;
-    vel += acc * dt;
-    cur += vel * dt;
-    return [cur, vel];
+
+  _chaseSpring(current, velocity, target, dt) {
+    const stiffness = 18;
+    const damping = 2.4;
+    const accel = stiffness * (target - current) - damping * velocity * 6;
+    velocity += accel * dt;
+    current += velocity * dt;
+    return [current, velocity];
   }
+
   cockpit(s, car, lookYaw, lookPitch, t, dt) {
-    // Anchor at driver eye [-0.35, 1.15, 0.15] in car space (x right, z fwd).
     const fx = Math.sin(car.ry), fz = Math.cos(car.ry);
     const rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
-    const eye = [car.x - rx * 0.35 + fx * 0.15, 1.22, car.z - rz * 0.35 + fz * 0.15];
-    // Chassis lag: spring the pitch/roll the camera inherits.
+    // Driver's eye: 0.35 m left of centre, 0.15 m forward, 1.22 m up.
+    const eye = [
+      car.x - rx * 0.35 + fx * 0.15,
+      1.22,
+      car.z - rz * 0.35 + fz * 0.15,
+    ];
     const phys = car.phys;
-    const targetP = phys ? phys.pitch : 0, targetR = phys ? phys.roll : 0;
-    [this.springP, this.springPV] = this._spring(this.springP, this.springPV, targetP, dt);
-    [this.springR, this.springRV] = this._spring(this.springR, this.springRV, targetR, dt);
-    // FOV punch: 75deg base + clamp(aLong * 0.35, -5deg, +12deg)
+    [this._springPitch, this._springPitchVel] = this._chaseSpring(
+      this._springPitch, this._springPitchVel, phys ? phys.pitch : 0, dt);
+    [this._springRoll, this._springRollVel] = this._chaseSpring(
+      this._springRoll, this._springRollVel, phys ? phys.roll : 0, dt);
+
+    // FOV punch: longitudinal acceleration breathes the lens between
+    // -5 and +12 degrees around the 75-degree base. The clamp keeps the
+    // value inside the range where the projection stays sane.
     const aLong = phys ? phys.aLong : 0;
-    const targetFov = 75 * Math.PI / 180 + clamp(aLong * 0.35, -5, 12) * Math.PI / 180;
-    this.fovPunch += (targetFov - this.fovPunch) * Math.min(1, dt * 6);
-    if (!this.fovPunch) this.fovPunch = targetFov;
-    this.fovPunch = clamp(this.fovPunch, 0.9, 2.2); // never let tan(fov/2) go negative
+    const fovTarget = BASE_FOV + clamp(aLong * 0.35, -5, 12) * Math.PI / 180;
+    if (!this.fovPunch) this.fovPunch = fovTarget;
+    this.fovPunch += (fovTarget - this.fovPunch) * Math.min(1, dt * 6);
+    this.fovPunch = clamp(this.fovPunch, 0.9, 2.2);
+
     const yaw = car.ry + lookYaw;
-    const pitch = lookPitch + this.springP * 0.7;
-    const d = viewDir(yaw, pitch);
-    // Road feel: kerb/bump jolts are added by main via s.roadJolt.
-    eye[1] += (s.roadJolt || 0);
-    // Trauma shake: displacement = T^2 * noise(t)
-    const T = s.trauma || 0;
-    if (T > 0.01) {
-      const sh = T * T * 0.14;
-      eye[0] += noise1(t, 1.3) * sh; eye[1] += noise1(t, 4.1) * sh * 0.7; eye[2] += noise1(t, 7.7) * sh;
+    const pitch = lookPitch + this._springPitch * 0.7;
+    const dir = viewDir(yaw, pitch);
+
+    eye[1] += s.roadJolt || 0;
+    const trauma = s.trauma || 0;
+    if (trauma > 0.01) {
+      const amp = trauma * trauma * 0.14;
+      eye[0] += shakeNoise(t, 1.3) * amp;
+      eye[1] += shakeNoise(t, 4.1) * amp * 0.7;
+      eye[2] += shakeNoise(t, 7.7) * amp;
     }
-    const center = [eye[0] + d[0] * 10, eye[1] + d[1] * 10, eye[2] + d[2] * 10];
-    const roll = this.springR * 0.8 + clamp(-(car.steerAngle || 0) * clamp(Math.abs(car.speed) / 20, 0, 1) * 0.3, -0.05, 0.05);
+    const center = [
+      eye[0] + dir[0] * 10,
+      eye[1] + dir[1] * 10,
+      eye[2] + dir[2] * 10,
+    ];
+    // Roll: mostly the sprung chassis roll, plus a steering lean that
+    // grows with speed (about 2-3 degrees at full lock and pace).
+    const speedFactor = clamp(Math.abs(car.speed) / 20, 0, 1);
+    const steerLean = clamp(-(car.steerAngle || 0) * speedFactor * 0.3, -0.05, 0.05);
+    const roll = this._springRoll * 0.8 + steerLean;
     const up = [-Math.cos(yaw) * roll, 1, Math.sin(yaw) * roll];
     return { eye, center, up, fov: this.fovPunch, yaw, pitch };
   }
+
   foot(s, lookYaw, lookPitch, t) {
     const p = s.player;
-    const bobY = p.speed > 0.2 ? Math.sin(p.bobPhase * 2) * 0.045 : 0;
-    const bobX = p.speed > 0.2 ? Math.cos(p.bobPhase) * 0.03 : 0;
-    const rx = Math.cos(lookYaw), rz = -Math.sin(lookYaw);
+    const walking = p.speed > 0.2;
+    const bobY = walking ? Math.sin(p.bobPhase * 2) * 0.045 : 0;
+    const bobX = walking ? Math.cos(p.bobPhase) * 0.03 : 0;
+    const rx = Math.cos(lookYaw);
+    const rz = -Math.sin(lookYaw);
     const eye = [p.x + rx * bobX, 1.72 + bobY, p.z + rz * bobX];
     const recoilPitch = (s.recoil || 0) * 0.03;
-    const d = viewDir(lookYaw, lookPitch - recoilPitch);
-    const T = s.trauma || 0;
-    if (T > 0.01) {
-      const sh = T * T * 0.1;
-      eye[0] += noise1(t, 2.2) * sh; eye[1] += noise1(t, 5.5) * sh;
+    const dir = viewDir(lookYaw, lookPitch - recoilPitch);
+    const trauma = s.trauma || 0;
+    if (trauma > 0.01) {
+      const amp = trauma * trauma * 0.1;
+      eye[0] += shakeNoise(t, 2.2) * amp;
+      eye[1] += shakeNoise(t, 5.5) * amp;
     }
-    const center = [eye[0] + d[0] * 10, eye[1] + d[1] * 10, eye[2] + d[2] * 10];
-    return { eye, center, up: [0, 1, 0], fov: 75 * Math.PI / 180, yaw: lookYaw, pitch: lookPitch };
+    const center = [
+      eye[0] + dir[0] * 10,
+      eye[1] + dir[1] * 10,
+      eye[2] + dir[2] * 10,
+    ];
+    return { eye, center, up: [0, 1, 0], fov: BASE_FOV, yaw: lookYaw, pitch: lookPitch };
   }
 }

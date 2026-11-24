@@ -1,35 +1,63 @@
-// GLSL sources (WO Task 1): dusk gradient sky, directional sun, exponential
-// squared fog, hemisphere ambient, wet-surface specular, emissive pass.
+// shaders.js — the game's only shader pair, written by hand for WebGL1.
+// The vertex stage passes world position, normal, uv and vertex colour
+// through. The fragment stage has two modes: sky mode paints the dusk
+// gradient (horizon glow -> mid band -> zenith, all three colours are
+// uniforms so a scene can regrade the whole sky), and surface mode does
+// warm directional sunlight over a hemisphere ambient, a low-angle sheen
+// on upward faces, an emissive shortcut, and peach exponential fog.
+
 export const VS = `
-attribute vec3 aPos; attribute vec3 aNorm; attribute vec2 aUv; attribute vec3 aCol;
-uniform mat4 uMvp; uniform mat4 uModel;
-varying vec3 vNorm; varying vec2 vUv; varying vec3 vCol; varying float vDist; varying vec3 vWp;
-void main(){
-  vec4 wp = uModel * vec4(aPos,1.0);
-  vWp = wp.xyz;
+attribute vec3 aPos;
+attribute vec3 aNorm;
+attribute vec2 aUv;
+attribute vec3 aCol;
+uniform mat4 uMvp;
+uniform mat4 uModel;
+varying vec3 vNorm;
+varying vec2 vUv;
+varying vec3 vCol;
+varying float vDist;
+varying vec3 vWp;
+void main() {
+  vec4 world = uModel * vec4(aPos, 1.0);
+  vWp = world.xyz;
   vNorm = normalize(mat3(uModel[0].xyz, uModel[1].xyz, uModel[2].xyz) * aNorm);
-  vUv = aUv; vCol = aCol;
-  vec4 clip = uMvp * vec4(aPos,1.0);
+  vUv = aUv;
+  vCol = aCol;
+  vec4 clip = uMvp * vec4(aPos, 1.0);
   vDist = length(clip.xyz);
   gl_Position = clip;
 }`;
+
 export const FS = `
 precision mediump float;
-varying vec3 vNorm; varying vec2 vUv; varying vec3 vCol; varying float vDist; varying vec3 vWp;
-uniform sampler2D uTex; uniform float uUseTex; uniform float uEmissive; uniform float uAlpha; uniform float uSky;
-uniform vec3 uSun; uniform vec3 uFogColor; uniform vec3 uHorizon; uniform vec3 uCam; uniform vec3 uZen; uniform vec3 uMid; uniform float uAmb;
-void main(){
+varying vec3 vNorm;
+varying vec2 vUv;
+varying vec3 vCol;
+varying float vDist;
+varying vec3 vWp;
+uniform sampler2D uTex;
+uniform float uUseTex;
+uniform float uEmissive;
+uniform float uAlpha;
+uniform float uSky;
+uniform vec3 uSun;
+uniform vec3 uFogColor;
+uniform vec3 uHorizon;
+uniform vec3 uCam;
+uniform vec3 uZen;
+uniform vec3 uMid;
+uniform float uAmb;
+void main() {
   if (uSky > 0.5) {
-    // Miami dusk: peach-orange horizon melting up into soft sky blue.
-    float h = clamp(normalize(vWp - uCam).y * 1.3 + 0.34, 0.0, 1.0);
-    vec3 zen = uZen;   // sky zenith (scene-driven: day dusk vs late dusk)
-    vec3 mid = uMid;   // mid-sky band
-    vec3 nad = vec3(0.99, 0.68, 0.45);   // warm horizon glow
-    vec3 col = mix(nad, mid, smoothstep(0.02, 0.42, h));
-    col = mix(col, zen, smoothstep(0.45, 1.0, h));
-    // golden sun glow near the sun azimuth
     vec3 dir = normalize(vWp - uCam);
-    float sunAmt = pow(max(dot(normalize(vec3(dir.x, 0.0, dir.z)), normalize(vec3(uSun.x, 0.0, uSun.z))), 0.0), 6.0);
+    float h = clamp(dir.y * 1.3 + 0.34, 0.0, 1.0);
+    vec3 glow = vec3(0.99, 0.68, 0.45);
+    vec3 col = mix(glow, uMid, smoothstep(0.02, 0.42, h));
+    col = mix(col, uZen, smoothstep(0.45, 1.0, h));
+    vec2 flatDir = normalize(dir.xz);
+    vec2 flatSun = normalize(uSun.xz);
+    float sunAmt = pow(max(dot(flatDir, flatSun), 0.0), 6.0);
     col += vec3(1.0, 0.72, 0.35) * sunAmt * (1.0 - abs(dir.y)) * 0.5;
     gl_FragColor = vec4(col, 1.0);
     return;
@@ -37,20 +65,19 @@ void main(){
   vec3 base = vCol;
   if (uUseTex > 0.5) base *= texture2D(uTex, vUv).rgb;
   vec3 n = normalize(vNorm);
-  float diff = max(dot(n, normalize(uSun)), 0.0);
-  // Hemisphere ambient: bright sky bounce, warm sand ground bounce.
-  vec3 hemi = mix(vec3(0.55,0.49,0.40), vec3(0.66,0.73,0.84), n.y * 0.5 + 0.5) * uAmb;
-  vec3 col = base * (hemi + 0.95 * diff * vec3(1.0,0.82,0.55)); // warm golden sunlight
-  // Wet-surface sheen: strong low-angle specular on upward faces, tinted by base.
-  vec3 v = normalize(uCam - vWp);
-  vec3 hv = normalize(v + normalize(uSun));
-  float spec = pow(max(dot(n, hv), 0.0), 64.0);
-  float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
-  col += (spec * 0.6 + fres * 0.10) * step(0.5, n.y) * mix(vec3(1.0), base + 0.35, 0.5);
+  vec3 sunDir = normalize(uSun);
+  float diffuse = max(dot(n, sunDir), 0.0);
+  vec3 hemi = mix(vec3(0.55, 0.49, 0.40), vec3(0.66, 0.73, 0.84), n.y * 0.5 + 0.5) * uAmb;
+  vec3 col = base * (hemi + diffuse * 0.95 * vec3(1.0, 0.82, 0.55));
+  vec3 viewDir = normalize(uCam - vWp);
+  vec3 halfVec = normalize(viewDir + sunDir);
+  float spec = pow(max(dot(n, halfVec), 0.0), 64.0);
+  float fresnel = pow(1.0 - max(dot(n, viewDir), 0.0), 3.0);
+  col += (spec * 0.6 + fresnel * 0.10) * step(0.5, n.y) * mix(vec3(1.0), base + 0.35, 0.5);
   col = mix(col, base * 1.3, uEmissive);
-  // Light warm haze: exponential squared fog, sigma = 0.0042, peach tones.
-  float f = 1.0 - exp(-pow(vDist * 0.0042, 2.0));
-  vec3 fogC = mix(uFogColor, uHorizon, clamp(1.0 - abs(normalize(vWp - uCam).y) * 2.2, 0.0, 1.0));
-  col = mix(col, fogC, clamp(f, 0.0, 1.0));
+  float fogF = 1.0 - exp(-pow(vDist * 0.0042, 2.0));
+  float horizonMix = clamp(1.0 - abs(normalize(vWp - uCam).y) * 2.2, 0.0, 1.0);
+  vec3 fogged = mix(uFogColor, uHorizon, horizonMix);
+  col = mix(col, fogged, clamp(fogF, 0.0, 1.0));
   gl_FragColor = vec4(col, uAlpha);
 }`;
