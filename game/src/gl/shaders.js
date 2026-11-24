@@ -1,10 +1,13 @@
-// shaders.js — the game's only shader pair, written by hand for WebGL1.
-// The vertex stage passes world position, normal, uv and vertex colour
-// through. The fragment stage has two modes: sky mode paints the dusk
-// gradient (horizon glow -> mid band -> zenith, all three colours are
-// uniforms so a scene can regrade the whole sky), and surface mode does
-// warm directional sunlight over a hemisphere ambient, a low-angle sheen
-// on upward faces, an emissive shortcut, and peach exponential fog.
+// shaders.js — the one and only shader pair, hand-written GLSL for
+// WebGL1. The vertex stage transforms a vertex, carries its normal, uv
+// and colour forward, and remembers world position and clip depth. The
+// fragment stage branches: in sky mode it paints the dusk gradient
+// (a fixed warm glow at the horizon, then uniform-driven mid and zenith
+// bands, plus a sun smear), and in surface mode it lights the vertex
+// colour / texture with warm directional sun over a hemisphere ambient,
+// adds an up-face sheen, honours the emissive shortcut, and finally
+// folds everything into peach exponential fog that leans toward the
+// horizon colour near eye level.
 
 export const VS = `
 attribute vec3 aPos;

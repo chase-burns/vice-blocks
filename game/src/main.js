@@ -1,8 +1,8 @@
-// main.js — the shell around the simulation: boot, static city meshes,
-// entity drawing (cars, the first-person cockpit, the gun viewmodel,
-// people, the police helicopter), input, event-to-sound wiring, the
-// render loop, and the deterministic screenshot harness. All game rules
-// live in src/game/; everything here is presentation.
+// main.js — the shell around the simulation: boot, the static city
+// meshes, entity drawing (cars, the first-person cockpit, the gun
+// viewmodel, people, the police helicopter), input, event-to-sound
+// wiring, the render loop, and the deterministic screenshot harness.
+// All game rules live in src/game/; everything here is presentation.
 import { Renderer, mat4LookAt, mat4Perspective, mat4Identity } from './gl/renderer.js';
 import { Builder } from './gl/mesh.js';
 import { drawDashTexture } from './gl/textures.js';
@@ -44,9 +44,9 @@ const rig = new CameraRig();
 const audio = new AudioEngine();
 
 // ------------------------------------------------------------ city meshes
-// The static world is baked into a handful of big meshes: one untextured
-// batch (markings, palms, props), one road batch, one sidewalk batch, and
-// one batch per facade texture.
+// The static world is baked into a handful of big meshes: one
+// untextured batch (markings, palms, props), one road batch, one
+// sidewalk batch, and one batch per facade texture.
 function buildCityMeshes(state) {
   const city = state.city;
   const plain = new Builder();
@@ -57,8 +57,8 @@ function buildCityMeshes(state) {
   city.buildings.forEach((b, bi) => {
     const batch = facadeBatches[b.tex];
     batch.box(b.x, 0, b.z, b.w, b.h, b.d, [1, 1, 1], Math.max(1, Math.round(b.h / 14)));
-    // Architectural relief in the same texture, tinted a touch darker:
-    // a parapet cap, a mid-height cornice band, and a podium base.
+    // Architectural relief in the same texture, tinted a touch
+    // darker: a parapet cap, a mid-height cornice band, a podium base.
     batch.box(b.x, b.h, b.z, b.w + 0.8, 1.0, b.d + 0.8, [0.92, 0.90, 0.86], 1);
     batch.box(b.x, b.h * 0.55, b.z, b.w + 0.5, 0.55, b.d + 0.5, [0.94, 0.92, 0.88], 1);
     batch.box(b.x, 0, b.z, b.w + 0.6, 1.4, b.d + 0.6, [0.9, 0.88, 0.84], 1);
@@ -106,8 +106,8 @@ function buildCityMeshes(state) {
   for (const palm of city.palms) {
     const sc = palm.s || 1;
     const lean = palm.lean || 0.1;
-    // Trunk: three stacked segments leaning progressively, then a crown
-    // of nine two-piece fronds.
+    // Trunk: three stacked segments leaning progressively, then a
+    // crown of nine two-piece fronds.
     let tx = palm.x;
     let tz = palm.z;
     for (let seg = 0; seg < 3; seg++) {
@@ -171,9 +171,10 @@ let MESH = buildCityMeshes(S);
 
 // ------------------------------------------------------- particles & skid
 const particles = [];
-function spawnParticle(x, y, z, vx, vy, vz, life, size, color, grav = 0) {
+function spawnParticle(x, y, z, vx, vy, vz, life, size, color, grav) {
+  const g = grav || 0;
   if (particles.length > 420) particles.shift();
-  particles.push({ x, y, z, vx, vy, vz, life, max: life, size, color, grav });
+  particles.push({ x, y, z, vx, vy, vz, life, max: life, size, color, grav: g });
 }
 function stepParticles(dt) {
   for (let i = particles.length - 1; i >= 0; i--) {
@@ -201,12 +202,14 @@ function drawSkids() {
 }
 
 // ------------------------------------------------------------ car drawing
-// Cars are assembled from tinted boxes in car space: a part helper places
-// boxes by (forward, right, height). Four body styles share the helper —
-// low sport coupe, black-and-white police interceptor, sedan, and the
-// sedan with a taxi checker band and roof sign.
-function drawCar(s, car, t, isPlayerCar = false) {
-  const { x, z } = car;
+// Cars are assembled from tinted boxes in car space: a part helper
+// places boxes by (forward, right, height). Four body styles share
+// the helper — low sport coupe, black-and-white police interceptor,
+// sedan, and the sedan with a taxi checker band and roof sign.
+function drawCar(s, car, t, isPlayerCar) {
+  const playerCar = isPlayerCar || false;
+  void playerCar;
+  const x = car.x, z = car.z;
   const ry = car.ry;
   const phys = car.phys;
   const pitch = phys ? -phys.pitch : (car._dispA || 0) * 0.002;
@@ -228,16 +231,19 @@ function drawCar(s, car, t, isPlayerCar = false) {
   const bodyColor = car.kind === 'dead' ? [0.15, 0.14, 0.16] : car.color;
   const glass = [0.13, 0.18, 0.24];
   const darkTrim = [0.08, 0.08, 0.1];
-  const part = (f, r, y, w, h, d, color, o = {}) =>
+  const part = (f, r, y, w, h, d, color, o) => {
+    const opts = o || {};
     R.box(x + fx * f + rx * r, y, z + fz * f + rz * r, ry, w, h, d, color,
-      { pitch, roll, ...o });
+      { pitch, roll, ...opts });
+  };
 
   const steerVisual = car === s.player.inCar && car.phys
     ? car.phys.steerAngle : (car.steer || 0) * 0.4;
   car._spin = (car._spin || 0) + (car.speed || 0) * 0.09;
   const drawWheels = (radiusF, radiusR, width, frontOff, rearOff) => {
     const corners = [[-1, frontOff, 1], [1, frontOff, 1], [-1, -rearOff, 0], [1, -rearOff, 0]];
-    for (const [sideSign, along, isFront] of corners) {
+    for (const corner of corners) {
+      const sideSign = corner[0], along = corner[1], isFront = corner[2];
       const rr = isFront ? radiusF : radiusR;
       const wx = x + rx * sideSign * 0.92 + fx * along;
       const wz = z + rz * sideSign * 0.92 + fz * along;
@@ -323,12 +329,13 @@ function drawCar(s, car, t, isPlayerCar = false) {
 }
 
 // ------------------------------------------------------- cockpit interior
-// Drawn in car space around the driver's eye. Layout contract (verified
-// by the cockpit QA): left-hand drive with the wheel centre near 33% of
-// frame width, the gauge cluster sunk onto the driver-side dash face so
-// its top edge lands in the frame's bottom quarter, a full-width two-step
-// dashboard, A-pillars, a narrow roof beam, a wide rear-view mirror on a
-// stalk, and a sliver of body-coloured hood over the dash line.
+// Drawn in car space around the driver's eye. Layout contract (the
+// cockpit QA verifies it): left-hand drive with the wheel centre near
+// 33% of frame width, the gauge cluster sunk onto the driver-side
+// dash face so its top edge lands in the frame's bottom quarter, a
+// full-width two-step dashboard, A-pillars, a narrow roof beam, a
+// wide rear-view mirror on a stalk, and a sliver of body-coloured
+// hood visible over the dash line.
 const DASH_DARK = [0.13, 0.14, 0.17];   // lower slab (#1a1d24 family)
 const DASH_MID = [0.19, 0.21, 0.26];    // upper step (#252a34 family)
 
@@ -337,22 +344,23 @@ function drawInterior(s, car) {
   const fx = Math.sin(car.ry), fz = Math.cos(car.ry);
   const rx = Math.cos(car.ry), rz = -Math.sin(car.ry);
   const at = (f, r, y) => [car.x + fx * f + rx * r, y, car.z + fz * f + rz * r];
-  const place = (f, r, y, w, h, d, color, o = {}) => {
+  const place = (f, r, y, w, h, d, color, o) => {
+    const opts = o || {};
     const q = at(f, r, y);
-    R.box(q[0], q[1], q[2], car.ry, w, h, d, color, o);
+    R.box(q[0], q[1], q[2], car.ry, w, h, d, color, opts);
   };
 
   // Hood sliver through the base of the windshield, in body colour.
   place(1.80, -0.2, 0.90, 2.3, 0.10, 1.15, car.color || [0.7, 0.2, 0.3]);
-  // Dashboard: two stepped full-width slabs. The cluster mounts on the
-  // driver-side face of the lower slab — not on the windshield side,
-  // where only its top edge would float into view.
+  // Dashboard: two stepped full-width slabs. The cluster mounts on
+  // the driver-side face of the lower slab — not on the windshield
+  // side, where only its top edge would float into view.
   place(1.15, -0.2, 0.79, 4.4, 0.46, 0.36, DASH_DARK);
   place(1.22, -0.2, 0.95, 4.4, 0.14, 0.24, DASH_MID);
   // Matte silver trim strip along the passenger side of the dash face.
   place(0.955, 0.45, 0.97, 0.95, 0.02, 0.012, [0.62, 0.64, 0.68]);
-  // Gauge cluster: dark housing plus the live dash texture panel, tilted
-  // up toward the driver.
+  // Gauge cluster: dark housing plus the live dash texture panel,
+  // tilted up toward the driver.
   place(0.945, -0.02, 0.778, 0.74, 0.36, 0.07, [0.09, 0.09, 0.11]);
   {
     const q = at(0.90, -0.02, 0.778);
@@ -360,9 +368,9 @@ function drawInterior(s, car) {
   }
   place(1.02, -0.02, 1.00, 0.86, 0.06, 0.32, DASH_DARK, { pitch: -0.38 });
 
-  // Steering wheel: a thin 16-segment ring (outer diameter ~0.31, tube
-  // ~0.03), three spokes at 9, 3 and 6 o'clock, a hub and a horn cap.
-  // The whole wheel rolls with the steering input. No hands — ever.
+  // Steering wheel: a thin 16-segment ring (outer diameter ~0.31,
+  // tube ~0.03), three spokes at 9, 3 and 6 o'clock, a hub and a horn
+  // cap. The whole wheel rolls with the steering input. No hands.
   const wheelRoll = -(car.phys ? car.phys.steerAngle : 0) * 3.2;
   const centre = at(0.80, -0.05, 0.84);
   const onWheel = (dx, dy) => {
@@ -400,8 +408,8 @@ function drawInterior(s, car) {
   place(1.16, -1.72, 1.42, 0.11, 1.30, 0.055, DASH_DARK, { pitch: -0.18, roll: -0.30 });
   place(1.24, -0.35, 2.00, 3.6, 0.10, 0.12, [0.08, 0.085, 0.10]);
 
-  // Rear-view mirror, 3.2:1, on a stalk from the beam: thin dark frame,
-  // blue-grey glass, one diagonal glint.
+  // Rear-view mirror, 3.2:1, on a stalk from the beam: thin dark
+  // frame, blue-grey glass, one diagonal glint.
   place(1.24, -0.32, 1.965, 0.03, 0.075, 0.03, [0.07, 0.07, 0.09]);
   place(1.26, -0.32, 1.90, 0.34, 0.105, 0.035, [0.07, 0.07, 0.09]);
   place(1.235, -0.32, 1.90, 0.30, 0.08, 0.012, [0.15, 0.21, 0.29], { emissive: true });
@@ -414,9 +422,9 @@ function drawInterior(s, car) {
 
 // ---------------------------------------------------------- gun viewmodel
 // The held weapon, built per type: the shotgun is long and thick, the
-// rifle long with a box magazine, the SMG compact with a long magazine,
-// the pistol short. While flashT is alive it also draws the muzzle flash
-// star and a tracer streak down the aim line.
+// rifle long with a box magazine, the SMG compact with a long
+// magazine, the pistol short. While flashT is alive it also draws the
+// muzzle flash star and a tracer streak down the aim line.
 const VIEWMODEL_SHAPES = {
   shotgun: { body: 0.62, bodyW: 0.11, barrel: 0.4, barrelW: 0.07, mag: 0 },
   rifle: { body: 0.58, bodyW: 0.08, barrel: 0.38, barrelW: 0.045, mag: 0.16 },
@@ -424,15 +432,16 @@ const VIEWMODEL_SHAPES = {
   pistol: { body: 0.46, bodyW: 0.09, barrel: 0.26, barrelW: 0.05, mag: 0 },
 };
 
-function drawGunView(s, eye, viewYaw, viewPitch, lowered = false) {
+function drawGunView(s, eye, viewYaw, viewPitch, lowered) {
+  const isLowered = lowered || false;
   const dir = viewDir(viewYaw, viewPitch);
   const rightX = -Math.cos(viewYaw);
   const rightZ = Math.sin(viewYaw);
-  const aiming = s.player.aim && !lowered;
+  const aiming = s.player.aim && !isLowered;
   const kick = (s.recoil || 0) * 0.03;
   const rightOff = aiming ? 0 : 0.23;
   const fwdOff = (aiming ? 0.62 : 0.58) - kick;
-  const downOff = lowered ? -0.5 : (aiming ? -0.20 : -0.30) + kick * 0.6;
+  const downOff = isLowered ? -0.5 : (aiming ? -0.20 : -0.30) + kick * 0.6;
   const gx = eye[0] + dir[0] * fwdOff + rightX * rightOff;
   const gy = eye[1] + dir[1] * fwdOff + downOff;
   const gz = eye[2] + dir[2] * fwdOff + rightZ * rightOff;
@@ -472,42 +481,43 @@ function drawGunView(s, eye, viewYaw, viewPitch, lowered = false) {
 }
 
 // ------------------------------------------------------------- people
-function drawPerson(s, x, z, ry, color, o = {}) {
+function drawPerson(s, x, z, ry, color, o) {
   void s;
+  const opts = o || {};
   const fx = Math.sin(ry), fz = Math.cos(ry);
   const rx = Math.cos(ry), rz = -Math.sin(ry);
   R.box(x, 0.02, z, ry, 0.8, 0.04, 0.8, [0.03, 0.02, 0.05], { alpha: 0.3 });
-  if (o.dead) {
+  if (opts.dead) {
     R.box(x, 0.12, z, ry, 0.55, 0.25, 1.6, color);
     return;
   }
-  const phase = o.walkPhase || 0;
+  const phase = opts.walkPhase || 0;
   const swing = Math.sin(phase) * 0.3;
-  const pants = o.pants || [0.22, 0.24, 0.34];
-  const skin = o.skin || [0.92, 0.76, 0.6];
+  const pants = opts.pants || [0.22, 0.24, 0.34];
+  const skin = opts.skin || [0.92, 0.76, 0.6];
   R.box(x - fx * swing * 0.4 - rx * 0.11, 0.4, z - fz * swing * 0.4 - rz * 0.11,
     ry, 0.19, 0.8, 0.23, pants, { pitch: swing * 0.7 });
   R.box(x + fx * swing * 0.4 + rx * 0.11, 0.4, z + fz * swing * 0.4 + rz * 0.11,
     ry, 0.19, 0.8, 0.23, pants, { pitch: -swing * 0.7 });
   R.box(x, 1.1, z, ry, 0.55, 0.65, 0.3, color);
-  const armY = o.handsUp ? 1.95 : 1.15;
-  const armPitch = o.handsUp ? 0.4 : swing * 0.55;
+  const armY = opts.handsUp ? 1.95 : 1.15;
+  const armPitch = opts.handsUp ? 0.4 : swing * 0.55;
   R.box(x - rx * 0.36 + fx * swing * 0.18, armY, z - rz * 0.36 + fz * swing * 0.18,
     ry, 0.14, 0.6, 0.16, color, { pitch: -armPitch });
   R.box(x + rx * 0.36 - fx * swing * 0.18, armY, z + rz * 0.36 - fz * swing * 0.18,
     ry, 0.14, 0.6, 0.16, color, { pitch: armPitch });
   R.box(x, 1.62, z, ry, 0.34, 0.36, 0.34, skin);
-  if (o.gun) {
+  if (opts.gun) {
     R.box(x + fx * 0.4, 1.25, z + fz * 0.4, ry, 0.08, 0.12, 0.45, [0.08, 0.08, 0.1]);
   }
 }
 
 // ------------------------------------------------------------ helicopter
-// Fuselage, tail boom and fin, a translucent rotor blur disc with two soft
-// blade bars, red/green nav lights, and the spotlight: three additive
-// cone slabs from the belly to the target point plus a radial pool panel
-// and a hot core where the beam lands. Flight pose is nose-down 15
-// degrees with a 10-degree bank.
+// Fuselage, tail boom and fin, a translucent rotor blur disc with two
+// soft blade bars, red/green nav lights, and the spotlight: three
+// additive cone slabs from the belly to the target point plus a
+// radial pool panel and a hot core where the beam lands. Flight pose
+// is nose-down 15 degrees with a 10-degree bank.
 function drawHelicopter(s, t) {
   const heli = s.heli;
   const player = s.player;
@@ -543,7 +553,9 @@ function drawHelicopter(s, t) {
   const beamLen = Math.hypot(dx, dz, sy);
   const beamYaw = Math.atan2(dx, dz);
   const beamPitch = Math.atan2(Math.hypot(dx, dz), sy);
-  for (const [frac, width] of [[0.18, 1.5], [0.5, 3.6], [0.82, 6.2]]) {
+  const beamSteps = [[0.18, 1.5], [0.5, 3.6], [0.82, 6.2]];
+  for (const stepDef of beamSteps) {
+    const frac = stepDef[0], width = stepDef[1];
     R.box(sx + dx * frac, sy * (1 - frac) + 0.3, sz + dz * frac,
       beamYaw, width, beamLen / 3.1, width, [1, 0.97, 0.82],
       { alpha: 0.15, pitch: -beamPitch, add: true });
@@ -558,7 +570,8 @@ let frameCount = 0;
 let lastDt = 1 / 60;
 
 function render(s, t) {
-  const [w, h] = R.resize();
+  const size = R.resize();
+  const w = size[0], h = size[1];
   const p = s.player;
   const car = p.inCar;
   let cam;
@@ -577,9 +590,10 @@ function render(s, t) {
   const proj = mat4Perspective(cam.fov, w / h, 0.05, 900);
   const view = mat4LookAt(cam.eye, cam.center, cam.up);
 
-  // The chase still is graded as late dusk: deep blue-purple zenith, dark
-  // orange horizon, dimmer ambient — the police lights and the spotlight
-  // carry the frame. Everything else plays in the peach daylight grade.
+  // The chase still is graded as late dusk: deep blue-purple zenith,
+  // dark orange horizon, dimmer ambient — the police lights and the
+  // spotlight carry the frame. Everything else plays in the peach
+  // daylight grade.
   const lateDusk = s.shotMode === 'chase';
   R.zen = lateDusk ? [0.15, 0.13, 0.36] : [0.42, 0.66, 0.92];
   R.mid = lateDusk ? [0.60, 0.30, 0.24] : [0.98, 0.78, 0.58];
@@ -605,7 +619,7 @@ function render(s, t) {
     R.box(zone.x, 2.2, zone.z, t * 0.4, 0.5, 4.4, 0.5, zone.color, { alpha: 0.30, emissive: true });
     R.box(zone.x, 4.6, zone.z, 0, 1.6, 0.5, 1.6, zone.color, { emissive: true });
   }
-  const target = s.mission?.target || s.taxi?.target;
+  const target = (s.mission && s.mission.target) || (s.taxi && s.taxi.target);
   if (target) {
     R.box(target.x, 2.4, target.z, t * 0.6, 0.7, 4.8, 0.7, [1, 0.9, 0.3], { alpha: 0.4, emissive: true });
   }
@@ -623,7 +637,8 @@ function render(s, t) {
   for (const c of s.cars) drawCar(s, c, t, c === p.inCar);
   for (const c of s.cops) if (c !== p.inCar) drawCar(s, c, t);
   if (s.heli) drawHelicopter(s, t);
-  for (const c of [...s.cars, ...s.cops]) {
+  const allVehicles = s.cars.concat(s.cops);
+  for (const c of allVehicles) {
     if (c.burning > 0) {
       spawnParticle(c.x, 1.1, c.z, (Math.random() - 0.5) * 1.4,
         2.4 + Math.random() * 1.6, (Math.random() - 0.5) * 1.4,
@@ -737,7 +752,8 @@ function readInput() {
 }
 
 function nearAnyCar() {
-  for (const c of [...S.cars, ...S.cops]) {
+  const all = S.cars.concat(S.cops);
+  for (const c of all) {
     if (dist2(c.x, c.z, S.player.x, S.player.z) < 4.5 * 4.5) return true;
   }
   return false;
@@ -772,9 +788,10 @@ function handleEvents(s) {
       case 'crash': case 'ram': audio.crash(evt.data || 8); break;
       case 'explode': {
         audio.noiseBurst(0.8, 0.7, 220);
-        const { x, z } = evt.data || s.player;
+        const origin = evt.data || s.player;
+        const ex = origin.x, ez = origin.z;
         for (let i = 0; i < 30; i++) {
-          spawnParticle(x, 1 + Math.random(), z,
+          spawnParticle(ex, 1 + Math.random(), ez,
             (Math.random() - 0.5) * 9, 2 + Math.random() * 5, (Math.random() - 0.5) * 9,
             0.7 + Math.random() * 0.5, 1.1,
             i % 3 ? [1, 0.55, 0.15] : [0.35, 0.3, 0.3]);
@@ -798,7 +815,7 @@ function handleEvents(s) {
         s.msg = "PAY 'N SPRAY — HEAT CLEARED, FRESH PAINT"; s.msgT = 2.5;
         break;
       case 'wanted':
-        s.msg = evt.data > 0 ? `WANTED ${'★'.repeat(evt.data)}` : 'HEAT LOST';
+        s.msg = evt.data > 0 ? 'WANTED ' + '★'.repeat(evt.data) : 'HEAT LOST';
         s.msgT = 2;
         break;
       case 'busted': break;
@@ -860,8 +877,8 @@ function computeRoadJolt(s, dt) {
   void dt;
   const car = s.player.inCar;
   if (!car) { s.roadJolt = 0; return; }
-  // Lateral distance to the nearest road centre line: crossing kerbs and
-  // the expansion joints between blocks thumps the cockpit camera.
+  // Lateral distance to the nearest road centre line: crossing kerbs
+  // and the expansion joints between blocks thumps the cockpit camera.
   let lateral = Infinity;
   for (const c of roadCenters()) {
     lateral = Math.min(lateral, Math.abs(car.x - c), Math.abs(car.z - c));
@@ -951,4 +968,4 @@ function loop(now) {
   }
 }
 requestAnimationFrame(loop);
-console.log('Vice Blocks 3D booted', shotMode ? `(shot=${shotMode} seed=${seedParam})` : '');
+console.log('Vice Blocks 3D booted', shotMode ? '(shot=' + shotMode + ' seed=' + seedParam + ')' : '');

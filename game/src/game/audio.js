@@ -1,9 +1,9 @@
-// audio.js — all sound is synthesised in WebAudio; there are no samples.
-// Continuous voices: a twin-saw engine whose pitch and filter follow RPM,
-// throttle-modulated intake noise, a tyre-screech band, and a two-tone
-// siren. On top of that, a step-sequenced procedural radio plays one of
-// two stations while driving, and short one-shot helpers cover gunshots,
-// crashes and the cash register.
+// audio.js — every sound is synthesised in WebAudio; there are no
+// samples. Continuous voices: a twin-saw engine whose pitch and
+// filter follow RPM, throttle-modulated intake noise, a tyre-screech
+// band, and a two-tone siren. Over those, a step-sequenced procedural
+// radio plays one of two stations while driving, and short one-shot
+// helpers cover gunshots, crashes and the cash register.
 
 const ENGINE_BASE_HZ = 45;
 const ENGINE_SPAN_HZ = 220;
@@ -21,8 +21,8 @@ export class AudioEngine {
       const ac = new (window.AudioContext || window.webkitAudioContext)();
       this.ac = ac;
 
-      // Engine voice: two slightly detuned saws into a lowpass whose
-      // cutoff opens with RPM^1.4.
+      // Engine: two slightly detuned saws into a lowpass whose cutoff
+      // opens with RPM^1.4.
       this._engGain = ac.createGain();
       this._engGain.gain.value = 0;
       this._engFilter = ac.createBiquadFilter();
@@ -41,7 +41,7 @@ export class AudioEngine {
       this._oscA.start();
       this._oscB.start();
 
-      // Intake rush: looping noise through a bandpass, gain follows throttle.
+      // Intake rush: looping noise through a bandpass, gain by throttle.
       this._rushGain = ac.createGain();
       this._rushGain.gain.value = 0;
       const rushFilter = ac.createBiquadFilter();
@@ -78,7 +78,8 @@ export class AudioEngine {
       this._sirenOsc.start();
 
       this.ok = true;
-    } catch {
+    } catch (err) {
+      void err;
       this.ok = false;
     }
   }
@@ -111,7 +112,7 @@ export class AudioEngine {
       this._oscA.frequency.value = hz;
       this._oscB.frequency.value = hz;
       this._engFilter.frequency.value = 200 + Math.pow(rpm, 1.4) * 2800;
-      this._rushGain.gain.value = driving ? (car.phys?.throttle || 0) * 0.03 : 0;
+      this._rushGain.gain.value = driving ? (car.phys ? car.phys.throttle || 0 : 0) * 0.03 : 0;
       const slip = Math.abs(car.slip || 0);
       const screeching = (slip > 1.1 && Math.abs(car.speed) > 4)
         || (car.handbrake && Math.abs(car.speed) > 6);
@@ -144,8 +145,8 @@ export class AudioEngine {
     osc.stop(ac.currentTime + dur);
   }
 
-  // Two stations, each a 32-step loop of bass + lead lines. Vice FM runs
-  // quicker and brighter; Solmar is the slower night station.
+  // Two stations, each a 32-step loop of bass and lead lines. Vice FM
+  // runs quicker and brighter; Solmar is the slower night station.
   _stepRadio(s) {
     const on = s.radio > 0 && s.player.inCar && s.mode === 'play';
     if (!on) { this._radioTimer = 0; return; }
@@ -167,18 +168,21 @@ export class AudioEngine {
     this._playNote(leadLines[s.radio][i], stepDur * 1.4, 'square', 0.045);
   }
 
-  beep(freq, dur, type = 'square', vol = 0.12, slide = 0) {
+  beep(freq, dur, type, vol, slide) {
     if (!this.ok) return;
+    const waveType = type || 'square';
+    const volume = vol === undefined ? 0.12 : vol;
+    const slideAmt = slide || 0;
     const ac = this.ac;
     const osc = ac.createOscillator();
     const gain = ac.createGain();
-    osc.type = type;
+    osc.type = waveType;
     osc.frequency.value = freq;
-    if (slide) {
+    if (slideAmt) {
       osc.frequency.exponentialRampToValueAtTime(
-        Math.max(30, freq + slide), ac.currentTime + dur);
+        Math.max(30, freq + slideAmt), ac.currentTime + dur);
     }
-    gain.gain.setValueAtTime(vol, ac.currentTime);
+    gain.gain.setValueAtTime(volume, ac.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
     osc.connect(gain);
     gain.connect(ac.destination);

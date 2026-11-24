@@ -1,11 +1,11 @@
 // Vice Blocks 3D — hand-in program for make.fun's gta6-01 bounty.
 //
-// The game is a static, offline bundle under game/ (hand-written WebGL,
-// no libraries, nothing fetched). This file is only the delivery plumbing:
-// it copies game/ and screenshots/ into the output directory and writes
-// dossier.json there using the vendored make.fun library, with the
-// scorer's own limits so a package the scorer would refuse fails here
-// first instead of at judging time.
+// The game itself is a static, offline bundle under game/ (hand-written
+// WebGL, no libraries, nothing fetched). This file is only the delivery
+// plumbing: it copies game/ and screenshots/ into the output directory
+// and writes dossier.json there using the vendored make.fun library,
+// with the scorer's own limits, so a package the scorer would refuse
+// fails here first instead of at judging time.
 //
 // Run locally with:  MAKEFUN_OUTPUT_DIR=out node main.ts
 // (MAKEFUN_OUTPUT_DIR stands in for /output outside the grader.)
@@ -21,8 +21,8 @@ const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 mkdirSync(outputDir, { recursive: true });
 cpSync(join(repoRoot, 'game'), join(outputDir, 'game'), { recursive: true });
 
-mkdirSync(join(outputDir, 'screenshots'), { recursive: true });
 const screenshotsDir = join(repoRoot, 'screenshots');
+mkdirSync(join(outputDir, 'screenshots'), { recursive: true });
 if (existsSync(screenshotsDir)) {
   cpSync(screenshotsDir, join(outputDir, 'screenshots'), { recursive: true });
 }

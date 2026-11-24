@@ -1,8 +1,9 @@
-// serve.ts — a minimal static file server for game/, so the entry can be
-// played locally with no build step: `node serve.ts` (or --port N) serves
-// http://localhost:8080. Standard library only. It answers with the MIME
-// types a browser game needs, refuses paths that escape game/, and does
-// nothing else — a development convenience, not an internet web server.
+// serve.ts — a minimal static file server for game/, so the entry can
+// be played locally with no build step: `node serve.ts` (or --port N)
+// serves http://localhost:8080. Standard library only. It answers with
+// the MIME types a browser game needs, refuses paths that escape
+// game/, and does nothing else — a development convenience, not an
+// internet-facing web server.
 import { createReadStream, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';

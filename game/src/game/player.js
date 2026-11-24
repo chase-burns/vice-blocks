@@ -1,17 +1,18 @@
 // player.js — everything the player does directly: walking in first
-// person, driving through the physics model, getting into (and stealing)
-// cars, shooting, shopping at the gun store, using the Pay 'n Spray from
-// the driver's seat, taking damage, and respawning after a bust or a
-// hospital visit.
+// person, driving through the physics model, climbing into (and
+// stealing) cars, shooting, shopping at the gun store, using the
+// Pay 'n Spray from the driver's seat, taking damage, and respawning
+// after a bust or a hospital visit.
 import { dist2 } from '../rng.js';
 import { collideBuildings, BLOCK } from './world.js';
 import { VehiclePhysics } from './physics.js';
 import { damageCar } from './traffic.js';
 import { witnessed } from './wanted.js';
 
-// The arsenal. All four weapons draw from one shared reserve pool; each
-// keeps its own magazine, fire cadence, spread, pellet count and vehicle
-// damage. Ammu-Nation sells them strictly in this order, keys 1-4 switch.
+// The arsenal. All four weapons share one reserve pool; each keeps its
+// own magazine field, cadence, spread, pellet count and vehicle
+// damage. Ammu-Nation sells them strictly in this order; keys 1–4
+// switch between the ones already owned.
 export const WEAPONS = {
   pistol: { label: 'PISTOL', short: '9MM', mag: 'ammo', size: 12, cd: 0.25, auto: false, spread: 1.2, carDmg: 18, range: 50, pellets: 1, price: 300 },
   smg: { label: 'SMG', short: 'SMG', mag: 'ammoSmg', size: 30, cd: 0.09, auto: true, spread: 2.8, carDmg: 9, range: 50, pellets: 1, price: 600 },
@@ -33,7 +34,7 @@ export function weaponDef(s) {
 }
 
 export function hurt(s, dmg) {
-  // Armour soaks 60% of incoming damage until it runs out.
+  // Armour soaks sixty percent of incoming damage until it runs out.
   const soaked = Math.min(s.armor, dmg * 0.6);
   s.armor -= soaked;
   s.health -= dmg - soaked;
@@ -59,7 +60,8 @@ export function enterExitCar(s) {
   }
   let nearest = null;
   let nearestD2 = 4.5 * 4.5;
-  for (const car of [...s.cars, ...s.cops]) {
+  const allCars = s.cars.concat(s.cops);
+  for (const car of allCars) {
     const d = dist2(car.x, car.z, p.x, p.z);
     if (d < nearestD2) { nearestD2 = d; nearest = car; }
   }
@@ -81,9 +83,9 @@ export function enterExitCar(s) {
   s.events.push({ name: 'enterCar' });
 }
 
-// One trigger pull. Resolution is per pellet: nearest pedestrian along
+// One trigger pull, resolved per pellet: the nearest pedestrian along
 // the shot line wins, then mission targets, then the nearest vehicle.
-// Consequences scale with what was actually hit.
+// The wanted consequences scale with what was actually hit.
 export function shoot(s) {
   const p = s.player;
   if (!s.hasGun || p.inCar) return;
@@ -143,7 +145,8 @@ export function shoot(s) {
       s.events.push({ name: 'hitPed' });
       continue;
     }
-    for (const car of [...s.cars, ...s.cops]) {
+    const allCars = s.cars.concat(s.cops);
+    for (const car of allCars) {
       const along = alongOf(car.x, car.z);
       if (along > 0 && along < W.range * 0.84 && Math.abs(lateralOf(car.x, car.z)) < 2.2) {
         damageCar(s, car, W.carDmg);
@@ -166,8 +169,8 @@ export function stepPlayerCar(s, input, dt) {
   const phys = car.phys;
   phys.powerMul = s.engineUp ? 1.15 : 1;
 
-  // Integrate at 120 Hz in two substeps; the bicycle model gets twitchy
-  // at frame rate under full lock.
+  // Integrate at 120 Hz in two substeps; the bicycle model gets
+  // twitchy at frame rate under full lock.
   const substeps = 2;
   const sdt = dt / substeps;
   let worstImpact = 0;
@@ -185,10 +188,11 @@ export function stepPlayerCar(s, input, dt) {
     const vz = fz * phys.u + rz * phys.v;
     let nx = car.x + vx * sdt;
     let nz = car.z + vz * sdt;
-    const [cx, cz] = collideBuildings(s.city, nx, nz, 1.7);
+    const resolved = collideBuildings(s.city, nx, nz, 1.7);
+    const cx = resolved[0], cz = resolved[1];
     if (cx !== nx || cz !== nz) {
-      // Building impact: kill the into-wall velocity component, keep half
-      // the tangential slide, bounce back at 0.2 restitution.
+      // Building impact: kill the into-wall velocity component, keep
+      // half the tangential slide, bounce at 0.2 restitution.
       const pushX = cx - nx, pushZ = cz - nz;
       const pushLen = Math.hypot(pushX, pushZ) || 1;
       const nxAxis = pushX / pushLen, nzAxis = pushZ / pushLen;
@@ -235,11 +239,12 @@ export function stepPlayerCar(s, input, dt) {
   collectPickups(s);
 }
 
-// Shoving other vehicles: ordinary traffic gets nudged aside; a roadblock
-// cruiser can be punched through — it spins off, its line breaks, and the
-// law notices.
+// Shoving other vehicles: ordinary traffic gets nudged aside; a
+// roadblock cruiser can be punched through — it spins off its line,
+// the line breaks, and the law notices.
 function resolveCarContacts(s, car, phys) {
-  for (const other of [...s.cars, ...s.cops]) {
+  const others = s.cars.concat(s.cops);
+  for (const other of others) {
     if (other === car || other.kind === 'dead') continue;
     if (dist2(other.x, other.z, car.x, car.z) >= 3.1 * 3.1) continue;
     if (car.velSpeed <= 2) continue;
@@ -296,9 +301,9 @@ export function stepPlayerFoot(s, input, dt) {
     dx /= len;
     dz /= len;
     p.ry = Math.atan2(dx, dz);
-    const [nx, nz] = collideBuildings(s.city, p.x + dx * speed * dt, p.z + dz * speed * dt, 0.55);
-    p.x = nx;
-    p.z = nz;
+    const resolved = collideBuildings(s.city, p.x + dx * speed * dt, p.z + dz * speed * dt, 0.55);
+    p.x = resolved[0];
+    p.z = resolved[1];
     p.speed = speed;
     p.bobPhase += dt * speed * 1.6;
   } else {
@@ -313,7 +318,7 @@ function inZone(p, zone) {
   return dist2(p.x, p.z, zone.x, zone.z) < zone.r * zone.r;
 }
 
-// On-foot zone effects: the gun store's purchase chain and hospital healing.
+// On-foot zone effects: the gun store's purchase chain, hospital healing.
 function stepFootZones(s, input, dt) {
   const p = s.player;
   const zones = s.city.zones;
@@ -335,7 +340,7 @@ function buyNextWeapon(s) {
   }
   const def = WEAPONS[nextKey];
   if (s.cash < def.price) {
-    s.msg = `${def.label} $${def.price} — NOT ENOUGH CASH`;
+    s.msg = def.label + ' $' + def.price + ' — NOT ENOUGH CASH';
     s.msgT = 2;
     return;
   }
@@ -345,7 +350,7 @@ function buyNextWeapon(s) {
   s.weapon = nextKey;
   s.msg = nextKey === 'pistol'
     ? 'PISTOL PURCHASED — RIGHT MOUSE AIM, LEFT CLICK FIRE'
-    : `${def.label} PURCHASED — KEYS 1-4 SWITCH`;
+    : def.label + ' PURCHASED — KEYS 1-4 SWITCH';
   s.msgT = nextKey === 'pistol' ? 3 : 2.5;
   s.events.push({ name: 'buyGun' });
   s.events.push({ name: 'save' });
@@ -366,8 +371,9 @@ function collectPickups(s) {
   }
 }
 
-// The Pay 'n Spray, used from the driver's seat. Priority order matters:
-// clearing heat first, then repairs, then the two one-time upgrades.
+// The Pay 'n Spray, used from the driver's seat. Priority order
+// matters: clearing heat first, then repairs, then the two one-time
+// garage upgrades.
 export function stepZonesCar(s, dt) {
   void dt;
   const p = s.player;

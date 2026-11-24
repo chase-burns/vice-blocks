@@ -1,8 +1,8 @@
-// hud.js — everything drawn over the 3D view: the DOM dashboard (health
-// and armour bars, cash, wanted stars, RESPECT rank, weapon line, speed,
-// mission text, bust meter, prompts), the SBPD dispatch board that names
-// every responding unit, the weapon-slot chips, and the rotating circular
-// minimap painted on a 2D canvas.
+// hud.js — everything drawn over the 3D view: the DOM dashboard
+// (health and armour bars, cash, wanted stars, the RESPECT rank,
+// weapon line, speed, mission text, bust meter, prompts), the SBPD
+// dispatch board that names every responding unit, the weapon-slot
+// chips, and the rotating circular minimap painted on a 2D canvas.
 import { roadCenters, CITY_HALF, districtAt } from './world.js';
 import { WEAPONS, WEAPON_ORDER, ownsWeapon, activeWeapon } from './player.js';
 
@@ -16,7 +16,9 @@ const RANK_THRESHOLDS = [
   { at: 0, name: 'RUNNER' },
 ];
 export function rankName(respect) {
-  for (const r of RANK_THRESHOLDS) if (respect >= r.at) return r.name;
+  for (const r of RANK_THRESHOLDS) {
+    if (respect >= r.at) return r.name;
+  }
   return 'RUNNER';
 }
 
@@ -69,7 +71,7 @@ export function drawMinimap(s, mm) {
   if (s.heli) dot(s.heli.x, s.heli.z, '#ffffff', 3.2);
   for (const car of s.cars) if (car.kind === 'traffic') dot(car.x, car.z, '#c8c8c8', 1.8);
   for (const pk of s.pickups) dot(pk.x, pk.z, '#3dff7a', 3);
-  const target = s.mission?.target || s.taxi?.target;
+  const target = (s.mission && s.mission.target) || (s.taxi && s.taxi.target);
   if (target) dot(target.x, target.z, '#ffe14f', 4.6);
   mm.restore();
 
@@ -93,13 +95,13 @@ function starString(wanted) {
 function weaponLine(s, car) {
   if (car) {
     const gear = car.gear === 0 ? 'R' : (car.gear == null ? 'N' : car.gear);
-    let line = `GEAR ${gear} · ${car.isDrifting ? 'DRIFT!' : ''}`;
-    if (s.radio) line += ` · RADIO ${s.radio === 1 ? 'VICE FM' : 'SOLMAR'}`;
+    let line = 'GEAR ' + gear + ' · ' + (car.isDrifting ? 'DRIFT!' : '');
+    if (s.radio) line += ' · RADIO ' + (s.radio === 1 ? 'VICE FM' : 'SOLMAR');
     return line;
   }
   if (!s.hasGun) return 'UNARMED';
   const def = WEAPONS[activeWeapon(s)];
-  let line = `${def.label} ${s[def.mag]} / ${s.reserve}`;
+  let line = def.label + ' ' + s[def.mag] + ' / ' + s.reserve;
   if (s.reloadT > 0) line += ' · RELOADING';
   return line;
 }
@@ -117,7 +119,8 @@ function renderSlots(s, ui, visible) {
       : owned
         ? 'border:1px solid rgba(255,255,255,.5);color:#fff;background:rgba(10,6,16,.6)'
         : 'border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.35);background:rgba(10,6,16,.45)';
-    return `<div style="${style};border-radius:6px;padding:4px 8px;font-size:11.5px;font-weight:800;letter-spacing:1px;text-shadow:0 1px 0 #000">${i + 1} ${WEAPONS[key].short}</div>`;
+    return '<div style="' + style + ';border-radius:6px;padding:4px 8px;font-size:11.5px;font-weight:800;letter-spacing:1px;text-shadow:0 1px 0 #000">'
+      + (i + 1) + ' ' + WEAPONS[key].short + '</div>';
   }).join('');
   if (ui.slots._html !== html) {
     ui.slots.innerHTML = html;
@@ -133,19 +136,19 @@ function renderDispatch(s, ui, visible) {
     if (cop.kind !== 'cop') continue;
     const dist = Math.round(Math.hypot(cop.x - s.player.x, cop.z - s.player.z));
     if (cop.roadblock) {
-      units.push(`■ ROADBLOCK · ${dist}m`);
+      units.push('■ ROADBLOCK · ' + dist + 'm');
     } else {
       const role = Math.abs(cop.z - s.player.z) > Math.abs(cop.x - s.player.x)
         ? 'PIT UNIT' : 'PATROL';
-      units.push(`${units.length % 2 ? '◆' : '●'} ${role} · ${dist}m`);
+      units.push((units.length % 2 ? '◆' : '●') + ' ' + role + ' · ' + dist + 'm');
     }
   }
   const show = s.wanted > 0 && visible && units.length > 0;
   ui.dispatch.style.display = show ? 'block' : 'none';
   if (!show) return;
   const rows = units.slice(0, 5).join('<br>')
-    + (units.length > 5 ? `<br>+${units.length - 5} more` : '');
-  const html = `<span class="dhead">SBPD DISPATCH · ${units.length} UNITS</span><br>${rows}`;
+    + (units.length > 5 ? '<br>+' + (units.length - 5) + ' more' : '');
+  const html = '<span class="dhead">SBPD DISPATCH · ' + units.length + ' UNITS</span><br>' + rows;
   if (ui.dispatch._html !== html) {
     ui.dispatch.innerHTML = html;
     ui.dispatch._html = html;
@@ -161,7 +164,7 @@ function computePrompt(s, nearCarFn, inCarNow) {
     if (distTo(zones.gunshop) < zones.gunshop.r * zones.gunshop.r) {
       const next = WEAPON_ORDER.find((w) => !ownsWeapon(s, w));
       return next
-        ? `AMMU-NATION — E BUY ${WEAPONS[next].label} $${WEAPONS[next].price}`
+        ? 'AMMU-NATION — E BUY ' + WEAPONS[next].label + ' $' + WEAPONS[next].price
         : 'AMMU-NATION — E RESTOCKS AMMO';
     }
     if (distTo(zones.hospital) < zones.hospital.r * zones.hospital.r) {
@@ -222,14 +225,14 @@ export function updateHUD(s, ui, nearCarFn) {
 
   const active = s.mission || s.taxi;
   ui.mission.textContent = playing && active
-    ? `${active.name || 'TAXI'} — ${active.desc || 'Pick up and drop off.'}`
+    ? (active.name || 'TAXI') + ' — ' + (active.desc || 'Pick up and drop off.')
     : '';
   const m = s.mission;
   const tx = s.taxi;
-  const timer = m?.timer > 0 ? m.timer : tx?.timer;
+  const timer = m && m.timer > 0 ? m.timer : tx && tx.timer;
   ui.timer.textContent = playing && timer > 0
     ? Math.ceil(timer) + 's'
-    : (m?.idx === 4 && m.surviveT > 0 ? 'SURVIVE ' + Math.ceil(m.surviveT) + 's' : '');
+    : (m && m.idx === 4 && m.surviveT > 0 ? 'SURVIVE ' + Math.ceil(m.surviveT) + 's' : '');
 
   const busting = s.bustTimer > 0.15 && s.wanted > 0;
   ui.bustbar.style.display = busting ? 'block' : 'none';
@@ -244,7 +247,7 @@ export function updateHUD(s, ui, nearCarFn) {
   }
 
   // Title / pause / busted / wasted overlay, plus the title screen's
-  // feature strip and save summary.
+  // feature strip and save summary line.
   if (ui.ovFeat) {
     ui.ovFeat.style.display = s.mode === 'title' ? 'block' : 'none';
     if (s.mode === 'title') {
@@ -256,7 +259,8 @@ export function updateHUD(s, ui, nearCarFn) {
     if (s.mode === 'title') {
       const weaponCount = WEAPON_ORDER.filter((w) => ownsWeapon(s, w)).length;
       ui.ovSave.textContent = s.missionIdx > 0
-        ? `CONTINUE — MISSIONS ${s.missionIdx}/8 · $${s.cash} · RESPECT ${rankName(s.respect || 0)} · ${weaponCount} WEAPON${weaponCount === 1 ? '' : 'S'}`
+        ? 'CONTINUE — MISSIONS ' + s.missionIdx + '/8 · $' + s.cash + ' · RESPECT ' + rankName(s.respect || 0)
+          + ' · ' + weaponCount + ' WEAPON' + (weaponCount === 1 ? '' : 'S')
         : 'NEW GAME — 8 MISSIONS AHEAD';
     }
   }
@@ -267,7 +271,7 @@ export function updateHUD(s, ui, nearCarFn) {
     ui.ovTitle.style.color = s.mode === 'busted' ? '#6ab0ff'
       : s.mode === 'wasted' ? '#ff5252' : '#ff8c42';
     ui.ovSub.textContent = s.mode === 'busted'
-      ? `Fine paid: $${s.fine || 0} · Click to continue`
+      ? 'Fine paid: $' + (s.fine || 0) + ' · Click to continue'
       : s.mode === 'wasted'
         ? 'Hospital bill $150 · Click to continue'
         : overlay[1];

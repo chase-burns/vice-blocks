@@ -1,10 +1,10 @@
-// missions.js — the eight-mission story chain plus endless taxi work.
-// The chain runs in order and each completion starts the next mission
-// immediately: a car theft, a timed courier, a gun-store errand with range
-// targets, a harbor holdup, a four-star survival escape, a five-checkpoint
-// street race, a roadblock run, and a stealth courier whose clock bleeds
-// while the heat is on. Finishing missions pays cash and RESPECT; taxi
-// fares (T while driving) pay cash only.
+// missions.js — the eight-mission story chain, plus endless taxi
+// work. The chain runs strictly in order and each completion starts
+// the next mission at once: a car theft, a timed courier, a gun-store
+// errand with range targets, a harbor holdup, a four-star survival
+// escape, a five-checkpoint street race, a roadblock run, and a
+// stealth courier whose clock bleeds while the heat is on. Missions
+// pay cash and RESPECT; taxi fares (T while driving) pay cash only.
 import { dist2 } from '../rng.js';
 import { BLOCK, roadCenters } from './world.js';
 
@@ -28,9 +28,9 @@ function randomCorner(s) {
   };
 }
 
-function banner(s, text, seconds = 2) {
+function banner(s, text, seconds) {
   s.banner = text;
-  s.bannerT = seconds;
+  s.bannerT = seconds === undefined ? 2 : seconds;
 }
 
 export function startMission(s) {
@@ -82,8 +82,8 @@ function completeMission(s, pay, label) {
     s.events.push({ name: 'respect', data: s.respect });
   }
   s.events.push({ name: 'cash', data: pay });
-  s.events.push({ name: 'missionDone', data: label || s.mission?.name || 'TAXI' });
-  banner(s, pay > 0 ? `MISSION PASSED  +$${pay}` : 'MISSION PASSED', 3.2);
+  s.events.push({ name: 'missionDone', data: label || (s.mission && s.mission.name) || 'TAXI' });
+  banner(s, pay > 0 ? 'MISSION PASSED  +$' + pay : 'MISSION PASSED', 3.2);
   if (s.mission) {
     s.mission = null;
     s.missionIdx++;
@@ -96,7 +96,7 @@ function completeMission(s, pay, label) {
 function failMission(s, why) {
   s.events.push({ name: 'missionFail', data: why });
   banner(s, 'MISSION FAILED', 2.6);
-  const idx = s.mission?.idx;
+  const idx = s.mission ? s.mission.idx : null;
   s.mission = null;
   s.taxi = null;
   if (idx != null) {
@@ -105,7 +105,7 @@ function failMission(s, why) {
   }
 }
 
-// --- per-mission steppers -------------------------------------------------
+// --- the individual mission steppers ------------------------------------
 
 function stepShorelineGrab(s, m, atTarget) {
   const p = s.player;
@@ -168,8 +168,9 @@ function stepRivalDeal(s, m, dt) {
       boss.aimTime = Math.max(0, boss.aimTime - dt);
     }
   }
-  // The mission completes once the briefcase money has been picked up.
-  if (boss?.done && !s.pickups.some((pk) => pk.cash === 2000)) {
+  // Completion lands once the briefcase money has been picked up —
+  // i.e. once no 2000-cash pickup is left lying on the ground.
+  if (boss && boss.done && !s.pickups.some((pk) => pk.cash === 2000)) {
     completeMission(s, 0);
   }
 }
@@ -204,7 +205,9 @@ function stepRoadblockRun(s, m, atTarget) {
 
 function stepNightCourier(s, m, atTarget, dt) {
   if (s.wanted >= 2) {
-    m.timer -= dt; // the generic timer below ticks once; heat ticks it again
+    // The generic timer below already ticked once this frame; heat
+    // makes it tick a second time.
+    m.timer -= dt;
     s.msg = 'TOO HOT — THE CLOCK IS BLEEDING';
     s.msgT = 0.4;
   }
@@ -223,9 +226,7 @@ export function stepMissions(s, dt) {
       && dist2(p.x, p.z, m.target.x, m.target.z) < m.target.r * m.target.r;
     switch (m.idx) {
       case 0: stepShorelineGrab(s, m, atTarget); break;
-      case 1:
-        stepCheckpointRun(s, m, atTarget, 3, (n) => `CHECKPOINT ${n + 1} / 3`);
-        break;
+      case 1: stepCheckpointRun(s, m, atTarget, 3, (n) => 'CHECKPOINT ' + (n + 1) + ' / 3'); break;
       case 2: stepGunRun(s, m); break;
       case 3: stepRivalDeal(s, m, dt); break;
       case 4:
@@ -233,9 +234,7 @@ export function stepMissions(s, dt) {
         if (s.mode !== 'play') return;
         break;
       case 5:
-        if (atTarget && p.inCar) {
-          stepCheckpointRun(s, m, true, 5, (n) => `CHECKPOINT ${n + 1} / 5`);
-        }
+        if (atTarget && p.inCar) stepCheckpointRun(s, m, true, 5, (n) => 'CHECKPOINT ' + (n + 1) + ' / 5');
         break;
       case 6: stepRoadblockRun(s, m, atTarget); break;
       case 7: stepNightCourier(s, m, atTarget, dt); break;

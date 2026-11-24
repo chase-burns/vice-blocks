@@ -1,8 +1,9 @@
-// camera.js — the two first-person rigs. The cockpit rig anchors at the
-// driver's eye, inherits chassis pitch/roll through soft springs, widens
-// its field of view under acceleration, rolls a few degrees against the
-// steering at speed, and shakes with an amplitude proportional to trauma
-// squared. The foot rig is a head-bobbing eye at 1.72 m. Pure math.
+// camera.js — the two first-person rigs. The cockpit rig anchors at
+// the driver's eye, inherits chassis pitch and roll through soft
+// springs, widens its field of view under acceleration, rolls a few
+// degrees against the steering at speed, and shakes with an amplitude
+// proportional to trauma squared. The foot rig is a head-bobbing eye
+// at 1.72 m. Pure math, no rendering.
 import { clamp } from '../rng.js';
 
 export function viewDir(yaw, pitch) {
@@ -10,7 +11,7 @@ export function viewDir(yaw, pitch) {
   return [Math.sin(yaw) * cp, -Math.sin(pitch), Math.cos(yaw) * cp];
 }
 
-// Cheap two-sine pseudo-noise for camera shake.
+// Cheap two-sine pseudo-noise, used for camera shake.
 function shakeNoise(t, seed) {
   return Math.sin(t * 31.7 + seed) * 0.6 + Math.sin(t * 57.3 + seed * 2.1) * 0.4;
 }
@@ -47,14 +48,16 @@ export class CameraRig {
       car.z - rz * 0.35 + fz * 0.15,
     ];
     const phys = car.phys;
-    [this._springPitch, this._springPitchVel] = this._chaseSpring(
+    const pitchSpring = this._chaseSpring(
       this._springPitch, this._springPitchVel, phys ? phys.pitch : 0, dt);
-    [this._springRoll, this._springRollVel] = this._chaseSpring(
+    this._springPitch = pitchSpring[0]; this._springPitchVel = pitchSpring[1];
+    const rollSpring = this._chaseSpring(
       this._springRoll, this._springRollVel, phys ? phys.roll : 0, dt);
+    this._springRoll = rollSpring[0]; this._springRollVel = rollSpring[1];
 
     // FOV punch: longitudinal acceleration breathes the lens between
-    // -5 and +12 degrees around the 75-degree base. The clamp keeps the
-    // value inside the range where the projection stays sane.
+    // −5 and +12 degrees around the 75-degree base. The clamp keeps
+    // the value inside the range where the projection stays sane.
     const aLong = phys ? phys.aLong : 0;
     const fovTarget = BASE_FOV + clamp(aLong * 0.35, -5, 12) * Math.PI / 180;
     if (!this.fovPunch) this.fovPunch = fovTarget;
@@ -79,7 +82,7 @@ export class CameraRig {
       eye[2] + dir[2] * 10,
     ];
     // Roll: mostly the sprung chassis roll, plus a steering lean that
-    // grows with speed (about 2-3 degrees at full lock and pace).
+    // grows with speed — about 2–3 degrees at full lock and pace.
     const speedFactor = clamp(Math.abs(car.speed) / 20, 0, 1);
     const steerLean = clamp(-(car.steerAngle || 0) * speedFactor * 0.3, -0.05, 0.05);
     const roll = this._springRoll * 0.8 + steerLean;

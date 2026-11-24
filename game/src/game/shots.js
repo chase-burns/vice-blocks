@@ -1,10 +1,11 @@
-// shots.js — deterministic staging for the four storefront screenshots.
-// Each scene rearranges the live game state (player, cars, cops, peds,
-// mission, wallet) into a composed still that shows real systems: the
-// title shows the save line, play shows a timed mission from the cockpit,
-// chase shows a four-star response at late dusk, and end shows an aimed
-// rifle mid-burst. Pure logic, so the QA scripts can verify visibility
-// counts and projections headlessly before anything is captured.
+// shots.js — deterministic staging for the four storefront
+// screenshots. Each scene rearranges the live game state (player,
+// cars, cops, peds, mission, wallet) into a composed still that shows
+// real systems at work: the title carries the save line, play shows a
+// timed mission from the cockpit, chase shows a four-star response at
+// late dusk, and end shows an aimed rifle mid-burst. Pure logic, so
+// the QA scripts can verify visibility counts and projections
+// headlessly before anything is captured.
 import { BLOCK, CITY_HALF, roadCenters } from './world.js';
 
 function stagePed(s, index, x, z, horiz, road, side) {
@@ -57,7 +58,8 @@ function stageStart(s) {
   coupe.z = p.z - 9;
   coupe.ry = 0.5;
   coupe.color = [0.95, 0.15, 0.55];
-  const coastRoad = roadCenters()[roadCenters().length - 1];
+  const centers = roadCenters();
+  const coastRoad = centers[centers.length - 1];
   for (let i = 0; i < 5; i++) {
     stagePed(s, i, coastRoad - 9.5, -46 - i * 7 + s.rng.range(-1, 1), false, coastRoad, -9.5);
   }
@@ -100,8 +102,9 @@ function stagePlay(s) {
 }
 
 // ------------------------------------------------------------- chase still
-// Does the segment eye->point pass through a building or a palm canopy?
-// Used to score candidate staging spots by helicopter visibility.
+// Does the segment eye->point pass through a building or a palm
+// canopy? Used to score candidate staging spots by how visible the
+// staged helicopter would be from the driver's eye.
 function segmentBlocked(s, eye, point) {
   for (const b of s.city.buildings) {
     const lo = [b.x - b.w / 2 - 0.3, 0, b.z - b.d / 2 - 0.3];
@@ -146,7 +149,8 @@ function segmentBlocked(s, eye, point) {
 }
 
 // Pick the stretch of the central north-south road where the staged
-// helicopter is least occluded and fewest palm canopies roof the corridor.
+// helicopter is least occluded and the fewest palm canopies roof the
+// corridor.
 function pickChaseSpot(s, roadC) {
   let bestZ = -30;
   let bestScore = Infinity;
@@ -215,7 +219,7 @@ function stageChase(s, out) {
     driver: true, stopped: 0, color: [0.95, 0.95, 0.97],
   });
 
-  // One unit tucked behind (seen in the mirror and on the minimap).
+  // One unit tucked behind — seen in the mirror and on the minimap.
   let pos = at(-2, -2.6);
   s.cops.push(makeCop(pos[0], pos[1], car.ry + 0.15));
   // A pursuit unit alongside ahead-left, fully in frame.
@@ -239,8 +243,8 @@ function stageChase(s, out) {
     const bp = at(15.3, side);
     return { kind: 'barrier', x: bp[0], z: bp[1] };
   });
-  // Air support high in the upper frame, broadside to the camera, with
-  // its spotlight pool landing between the player and the roadblock.
+  // Air support high in the upper frame, broadside to the camera,
+  // its spotlight pool landing between player and roadblock.
   const heliPos = at(22, -5);
   s.heli = { a: 0, h: 11.8, ry: car.ry + 1.15, x: heliPos[0], z: heliPos[1] };
   const poolPos = at(8.5, 0);
@@ -259,7 +263,7 @@ function stageChase(s, out) {
   stagePed(s, 1, roadC + 10.5, car.z + 14, false, roadC, 10.5);
   stagePed(s, 2, roadC + 2, car.z + 22, true, roadC, 12);
   stagePed(s, 3, roadC + 16, car.z + 4, true, roadC, -13);
-  // Drift smoke behind the car and a spray of sparks at the sill.
+  // Drift smoke behind the car, and a spray of sparks at the sill.
   const rng = s.rng;
   for (let i = 0; i < 26; i++) {
     out.puffs.push({
@@ -289,14 +293,14 @@ function aabbDistance(x, z, b) {
   return Math.hypot(dx, dz);
 }
 
-// Find a vantage near the Pay 'n Spray with a clear view of it: no palm
-// at the camera or across the first metres of the sight line, no car or
-// building in the way.
+// Find a vantage near the Pay 'n Spray with a clear view of it: no
+// palm at the camera or across the first metres of the sight line,
+// no car or building in the way.
 function pickEndVantage(s, spray) {
   const candidates = [[-10, 12], [-4, 14], [-14, 6], [-6, 8], [-12, 16], [-2, 10], [-16, 12]];
-  for (const [ox, oz] of candidates) {
-    const px = spray.x + ox;
-    const pz = spray.z + oz;
+  for (const cand of candidates) {
+    const px = spray.x + cand[0];
+    const pz = spray.z + cand[1];
     const yaw = Math.atan2(spray.x - px, spray.z - pz);
     const fx = Math.sin(yaw);
     const fz = Math.cos(yaw);
@@ -333,11 +337,11 @@ function pickEndVantage(s, spray) {
 function stageEnd(s, out) {
   const spray = s.city.zones.spray;
   const p = s.player;
-  const [px, pz] = pickEndVantage(s, spray);
-  p.x = px;
-  p.z = pz;
-  // Aim at the spray shop, nudged so the gold car sits off the aim line
-  // and the muzzle flash reads against the street.
+  const vantage = pickEndVantage(s, spray);
+  p.x = vantage[0];
+  p.z = vantage[1];
+  // Aim at the spray shop, nudged so the gold car sits off the aim
+  // line and the muzzle flash reads against the street.
   s.camYaw = Math.atan2(spray.x - p.x, spray.z - p.z) + 0.13;
   p.ry = s.camYaw;
   s.hasGun = true;
@@ -411,7 +415,7 @@ export function shotCamera(s, kind) {
 }
 
 // Count staged entities inside a ~55-degree cone around the view
-// direction — the headless density check the capture pipeline relies on.
+// direction — the headless density check the capture pipeline uses.
 export function countVisible(s, kind) {
   const cam = shotCamera(s, kind);
   const dirX = Math.sin(cam.yaw);

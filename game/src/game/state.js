@@ -1,7 +1,8 @@
-// state.js — assembles the whole game state and advances it one tick at
-// a time in a fixed order: player, reload, fire/explosion chain, traffic,
-// pedestrians, density, wanted, missions. Pure logic with no DOM and no
-// WebGL, so the same code runs headless in Node for smoke tests.
+// state.js — assembles the whole game state and advances it one tick
+// at a time in a fixed order: player, reload, the fire/explosion
+// chain, traffic, pedestrians, density, wanted, missions. It is pure
+// logic with no DOM and no WebGL, so the same code runs headless in
+// Node for the smoke tests.
 import { makeRng, clamp, dist2 } from '../rng.js';
 import { genCity, BLOCK } from './world.js';
 import { spawnTraffic, spawnParked, stepTrafficCar, placeCarNear, damageCar } from './traffic.js';
@@ -29,7 +30,7 @@ export function createState(seed, saved) {
     events: [],
     stats: { stolen: 0, earned: 0 },
     health: 100, armor: 0, cash: 80,
-    // arsenal (see player.js WEAPONS for the per-weapon fields)
+    // arsenal fields (see player.js WEAPONS for the definitions)
     hasGun: false, ammo: 12, reserve: 240, reloadT: 0,
     hasSmg: false, weapon: 'pistol', ammoSmg: 0, fireCd: 0,
     hasShotgun: false, ammoShotgun: 0,
@@ -41,16 +42,17 @@ export function createState(seed, saved) {
     pendingStars: null, dispatchT: 0, wantedDecay: 0,
     // story
     missionIdx: 0, mission: null, taxi: null, boss: null,
-    // presentation timers, driven from here and read by the HUD/audio
+    // presentation timers, driven from here and read by HUD/audio
     banner: '', bannerT: 0, bannerColor: '', msg: '', msgT: 0,
     fine: 0, camYaw: 0, trauma: 0, recoil: 0, roadJolt: 0,
     gunfireT: 0, gunfireX: 0, gunfireZ: 0, shotMode: '',
   };
-  // Indirection so the logic modules can call each other without cycles.
+  // Indirection so the logic modules can call each other without
+  // import cycles.
   s.wantedAPI = { add: wantedMod.addWanted };
   s.playerAPI = { hurt: playerMod.hurt };
 
-  s.cars = [...spawnTraffic(rng, TRAFFIC_COUNT), ...spawnParked(rng, PARKED_COUNT)];
+  s.cars = spawnTraffic(rng, TRAFFIC_COUNT).concat(spawnParked(rng, PARKED_COUNT));
   for (const car of s.cars) {
     const looksTaxi = car.color[0] > 0.9 && car.color[1] > 0.7 && car.color[2] < 0.3;
     if (looksTaxi) car.style = 'taxi';
@@ -88,10 +90,10 @@ export function drainEvents(s) {
 }
 
 // The burn chain: a car at zero health catches fire, burns for a few
-// seconds, then explodes — damaging nearby cars (which may then burn and
-// explode in turn), scattering pedestrians and shaking the player.
+// seconds, then explodes — damaging nearby cars (which may then burn
+// and explode in turn), scattering pedestrians and shaking the player.
 export function processBurning(s, dt) {
-  const everyone = [...s.cars, ...s.cops];
+  const everyone = s.cars.concat(s.cops);
   for (const car of everyone) {
     if (car.kind === 'dead') continue;
     if (car.hp <= 0 && car.burning == null) {
@@ -131,8 +133,8 @@ export function processBurning(s, dt) {
   }
 }
 
-// Keep the player's neighbourhood alive: at least five pedestrians and
-// four traffic cars within 60 m, recycled from the far side of the city.
+// Keep the player's neighbourhood alive: at least five pedestrians
+// and four traffic cars within 60 m, recycled from far across the city.
 export function manageDensity(s) {
   const p = s.player;
   let nearPeds = 0;

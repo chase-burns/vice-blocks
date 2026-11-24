@@ -1,8 +1,9 @@
-// traffic.js — the ambient vehicle pool: lane-following cars that brake
-// for whatever is ahead of them and U-turn at the city edge, plus parked
-// cars waiting to be stolen. Ambient cars are kinematic; only the player's
-// car runs the full physics model. Also home to damageCar, the one place
-// vehicle hit points are allowed to change.
+// traffic.js — the ambient vehicle pool. Traffic cars follow lanes,
+// brake for whatever is ahead of them and U-turn at the city edge;
+// parked cars sit at the kerb waiting to be stolen. Ambient cars are
+// kinematic — only the player's car runs the full physics model.
+// damageCar also lives here: it is the single place vehicle hit
+// points are allowed to change.
 import { clamp, dist2 } from '../rng.js';
 import { roadCenters, CITY_HALF } from './world.js';
 
@@ -12,14 +13,16 @@ export const CAR_COLORS = [
 ];
 const TAXI_YELLOW = [0.98, 0.78, 0.15];
 
-function laneHeading(horiz, dir) {
-  return horiz ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (dir > 0 ? 0 : Math.PI);
+function headingFor(horiz, dir) {
+  if (horiz) return dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+  return dir > 0 ? 0 : Math.PI;
 }
 
-export function spawnTraffic(rng, n = 16) {
+export function spawnTraffic(rng, n) {
+  const count = n === undefined ? 16 : n;
   const centers = roadCenters();
   const cars = [];
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < count; i++) {
     const horiz = rng.chance(0.5);
     const road = centers[rng.int(1, centers.length - 2)];
     const dir = rng.chance(0.5) ? 1 : -1;
@@ -29,20 +32,21 @@ export function spawnTraffic(rng, n = 16) {
       id: i, kind: 'traffic',
       x: horiz ? along : lane,
       z: horiz ? lane : along,
-      ry: laneHeading(horiz, dir),
+      ry: headingFor(horiz, dir),
       speed: 0, targetSpeed: rng.range(9.5, 12.5),
       horiz, road, dir,
-      color: rng.chance(0.14) ? [...TAXI_YELLOW] : CAR_COLORS[rng.int(0, CAR_COLORS.length - 1)],
+      color: rng.chance(0.14) ? TAXI_YELLOW.slice() : CAR_COLORS[rng.int(0, CAR_COLORS.length - 1)],
       hp: 100, smoke: 0, driver: true, stopped: 0, style: 'sedan',
     });
   }
   return cars;
 }
 
-export function spawnParked(rng, n = 10) {
+export function spawnParked(rng, n) {
+  const count = n === undefined ? 10 : n;
   const centers = roadCenters();
   const cars = [];
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < count; i++) {
     const road = centers[rng.int(0, centers.length - 1)];
     const horiz = rng.chance(0.5);
     const along = rng.range(-CITY_HALF + 10, CITY_HALF - 10);
@@ -61,7 +65,7 @@ export function spawnParked(rng, n = 10) {
   return cars;
 }
 
-// Is something `aheadDist` metres in front of this car, within `width`?
+// True when `other` sits in front of `car`, inside the scan corridor.
 function blockedAhead(s, car, other, width) {
   if (!other || other === car) return false;
   const fx = Math.sin(car.ry);
@@ -78,8 +82,9 @@ export function stepTrafficCar(s, car, dt) {
   let blocked = false;
   for (const other of s.cars) if (blockedAhead(s, car, other, 2.4)) blocked = true;
   for (const cop of s.cops) if (blockedAhead(s, car, cop, 2.4)) blocked = true;
-  if (s.player.inCar) { if (blockedAhead(s, car, s.player.inCar, 2.4)) blocked = true; }
-  else if (blockedAhead(s, car, s.player, 1.6)) blocked = true;
+  if (s.player.inCar) {
+    if (blockedAhead(s, car, s.player.inCar, 2.4)) blocked = true;
+  } else if (blockedAhead(s, car, s.player, 1.6)) blocked = true;
 
   car.stopped = blocked ? car.stopped + dt : 0;
   const target = blocked ? 0 : car.targetSpeed;
@@ -87,7 +92,7 @@ export function stepTrafficCar(s, car, dt) {
   car.x += Math.sin(car.ry) * car.speed * dt;
   car.z += Math.cos(car.ry) * car.speed * dt;
 
-  // Turn around at the city edge rather than leaving the world.
+  // At the city edge, turn around instead of leaving the world.
   const lim = CITY_HALF - 6;
   if (Math.abs(car.x) > lim || Math.abs(car.z) > lim) {
     car.ry += Math.PI;
@@ -95,7 +100,7 @@ export function stepTrafficCar(s, car, dt) {
     car.z = clamp(car.z, -lim, lim);
     car.horiz = !car.horiz;
   }
-  // Drift back to the centre of the current lane.
+  // Ease back toward the centre of the lane being followed.
   const centers = roadCenters();
   let nearest = centers[0];
   let nearestDist = Infinity;
@@ -111,8 +116,8 @@ export function stepTrafficCar(s, car, dt) {
   }
 }
 
-// Recycle a far-away traffic car onto a lane near the player (the density
-// manager in state.js decides when this is needed).
+// Move a far-away traffic car onto a lane near the player. The density
+// manager in state.js decides when this recycling is needed.
 export function placeCarNear(s, car, rng) {
   const centers = roadCenters();
   const p = s.player;
@@ -127,16 +132,14 @@ export function placeCarNear(s, car, rng) {
   const ahead = rng.range(22, 48);
   const heading = p.inCar ? p.inCar.ry : p.ry;
   const forward = horiz ? Math.sin(heading) : Math.cos(heading);
-  const along = clamp(
-    (horiz ? p.x : p.z) + forward * ahead * dir,
-    -CITY_HALF + 8, CITY_HALF - 8);
+  const along = clamp((horiz ? p.x : p.z) + forward * ahead * dir, -CITY_HALF + 8, CITY_HALF - 8);
   const lane = road + dir * 3.6;
   car.horiz = horiz;
   car.road = road;
   car.dir = dir;
   car.x = horiz ? along : lane;
   car.z = horiz ? lane : along;
-  car.ry = laneHeading(horiz, dir);
+  car.ry = headingFor(horiz, dir);
   car.speed = car.targetSpeed * 0.7;
   return car;
 }

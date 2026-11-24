@@ -1,9 +1,10 @@
-// pedestrians.js — the people on the sidewalks. Each ped is a tiny state
-// machine: walk along a pavement, occasionally cross the road, flee from
-// danger (a fast car, gunfire, an aimed weapon), and — if the player holds
-// a gun on them at close range for a second and a half — put their hands
-// up and drop their wallet. Bright clothing is deliberate: at screenshot
-// size a ped has to read as a person, not a grey post.
+// pedestrians.js — the people on the sidewalks. Each pedestrian is a
+// small state machine: stroll along a pavement, sometimes cross the
+// road, flee danger (a fast car nearby, gunfire, an aimed weapon),
+// and — held at gunpoint at close range for a second and a half — put
+// their hands up and drop their wallet as a pickup. Clothing colours
+// are deliberately bright: at screenshot size a pedestrian has to
+// read as a person, not as a grey post.
 import { clamp, dist2 } from '../rng.js';
 import { roadCenters, CITY_HALF, collideBuildings } from './world.js';
 
@@ -21,6 +22,7 @@ export const SKINS = [
 ];
 
 export function spawnPed(s, rng) {
+  void s;
   const centers = roadCenters();
   const road = centers[rng.int(0, centers.length - 1)];
   const horiz = rng.chance(0.5);
@@ -41,16 +43,18 @@ export function spawnPed(s, rng) {
   };
 }
 
-// Move a ped onto a sidewalk 20–52 m from the player. The density manager
-// recycles distant walkers through here so the player's streets stay lived-in.
+// Place a pedestrian on a sidewalk 20–52 m from the player; the
+// density manager recycles distant walkers through here.
 export function placePedNear(s, ped, rng) {
   const centers = roadCenters();
   const p = s.player;
   let roadX = centers[0], roadZ = centers[0];
   let bestX = Infinity, bestZ = Infinity;
   for (const c of centers) {
-    if (Math.abs(p.x - c) < bestX) { bestX = Math.abs(p.x - c); roadX = c; }
-    if (Math.abs(p.z - c) < bestZ) { bestZ = Math.abs(p.z - c); roadZ = c; }
+    const dx = Math.abs(p.x - c);
+    if (dx < bestX) { bestX = dx; roadX = c; }
+    const dz = Math.abs(p.z - c);
+    if (dz < bestZ) { bestZ = dz; roadZ = c; }
   }
   const horiz = rng.chance(0.5);
   const along = rng.range(20, 52) * (rng.chance(0.5) ? 1 : -1);
@@ -82,9 +86,9 @@ function senseDanger(s, ped) {
 }
 
 function keepOutOfBuildings(s, ped) {
-  const [nx, nz] = collideBuildings(s.city, ped.x, ped.z, 0.5);
-  ped.x = nx;
-  ped.z = nz;
+  const resolved = collideBuildings(s.city, ped.x, ped.z, 0.5);
+  ped.x = resolved[0];
+  ped.z = resolved[1];
 }
 
 export function stepPed(s, ped, dt) {
@@ -93,8 +97,8 @@ export function stepPed(s, ped, dt) {
   const danger = senseDanger(s, ped);
   if (danger && ped.state !== 'robbed' && ped.state !== 'handsup') ped.state = 'flee';
 
-  // Gunpoint robbery: sustained close-range aim fills aimTime; at 1.5 s
-  // the ped surrenders their wallet as a ground pickup and then runs.
+  // Gunpoint robbery: sustained close aim fills aimTime; at 1.5 s the
+  // wallet drops as a ground pickup, a star is raised, and they run.
   const heldAtGunpoint = pl.aim && s.hasGun && !pl.inCar && !ped.robbed
     && dist2(ped.x, ped.z, pl.x, pl.z) < 6 * 6;
   if (heldAtGunpoint) {
@@ -114,10 +118,9 @@ export function stepPed(s, ped, dt) {
   if (ped.state === 'handsup') return;
 
   if (ped.state === 'flee') {
-    const threatX = s.gunfireT > 0 ? s.gunfireX : (pl.inCar || pl).x;
-    const threatZ = s.gunfireT > 0 ? s.gunfireZ : (pl.inCar || pl).z;
-    const dx = ped.x - threatX;
-    const dz = ped.z - threatZ;
+    const threat = s.gunfireT > 0 ? { x: s.gunfireX, z: s.gunfireZ } : (pl.inCar || pl);
+    const dx = ped.x - threat.x;
+    const dz = ped.z - threat.z;
     const d = Math.hypot(dx, dz) || 1;
     ped.x += (dx / d) * 5.2 * dt;
     ped.z += (dz / d) * 5.2 * dt;
@@ -148,7 +151,7 @@ export function stepPed(s, ped, dt) {
     return;
   }
 
-  // Plain walking: stroll, and every so often either turn around or
+  // Plain walking: stroll on, and now and then either turn around or
   // decide to cross the street.
   ped.t -= dt;
   if (ped.t <= 0) {

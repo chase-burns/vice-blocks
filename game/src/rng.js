@@ -1,44 +1,49 @@
-// rng.js — seeded randomness plus the small numeric helpers every module
-// shares. The generator is mulberry32 (one 32-bit state word): fast, and
-// stable across runs, so a seed always grows the same city and the same
-// screenshot scenes. Nothing here touches the DOM.
+// rng.js — deterministic randomness and the handful of numeric helpers
+// that every other module leans on. The core generator is mulberry32:
+// a single 32-bit word of state, advanced with an odd increment and then
+// scrambled with two imul/xorshift rounds. Because it is seeded, one seed
+// always grows the identical city, traffic layout and screenshot scene,
+// which is what makes the stills reproducible. No DOM access here.
 
 export function makeRng(seed) {
-  let state = (seed >>> 0) || 1;
-  function next() {
-    state = (state + 0x6D2B79F5) | 0;
-    let t = state;
+  let word = (seed >>> 0) || 1;
+  const next = function () {
+    word = (word + 0x6D2B79F5) | 0;
+    let t = word;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  }
-  next.range = (lo, hi) => lo + next() * (hi - lo);
-  next.int = (lo, hi) => lo + Math.floor(next() * (hi - lo + 1));
-  next.pick = (arr) => arr[Math.floor(next() * arr.length) % arr.length];
-  next.chance = (p) => next() < p;
+  };
+  next.range = function (lo, hi) { return lo + next() * (hi - lo); };
+  next.int = function (lo, hi) { return lo + Math.floor(next() * (hi - lo + 1)); };
+  next.pick = function (arr) { return arr[Math.floor(next() * arr.length) % arr.length]; };
+  next.chance = function (p) { return next() < p; };
   return next;
 }
 
 export function clamp(v, lo, hi) {
-  return v < lo ? lo : v > hi ? hi : v;
+  if (v < lo) return lo;
+  if (v > hi) return hi;
+  return v;
 }
 
 export function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-// Squared distance on the ground plane. Every proximity check in the game
-// goes through this, so it deliberately skips the square root.
+// Ground-plane squared distance. All proximity tests in the game use
+// this form so they can compare against a squared radius and skip sqrt.
 export function dist2(ax, az, bx, bz) {
   const dx = ax - bx;
   const dz = az - bz;
   return dx * dx + dz * dz;
 }
 
-// Interpolate between two headings along the shortest arc.
+// Shortest-arc interpolation between two headings, in radians.
 export function angleLerp(a, b, t) {
-  let d = (b - a) % (Math.PI * 2);
-  if (d > Math.PI) d -= Math.PI * 2;
-  else if (d < -Math.PI) d += Math.PI * 2;
+  const TAU = Math.PI * 2;
+  let d = (b - a) % TAU;
+  if (d > Math.PI) d -= TAU;
+  else if (d < -Math.PI) d += TAU;
   return a + d * t;
 }

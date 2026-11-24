@@ -1,7 +1,8 @@
-/* Vice Blocks 3D — HUD styling. Warm Vice palette (sunset orange, gold,
-   ice blue), skewed health bars, dark pills behind anything that has to
-   stay readable over bright streets, a soft CRT scanline overlay, and a
-   pulsing banner. Layout is fixed-position over the fullscreen canvas. */
+/* Vice Blocks 3D — HUD styling. A warm Vice palette (sunset orange,
+   gold, ice blue), skewed health bars, dark pills behind anything
+   that must stay readable over bright streets, a soft CRT scanline
+   overlay, and a pulsing banner. Everything is fixed-position over
+   the fullscreen canvas. */
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: 100%; height: 100%; overflow: hidden; background: #1a0f1e; }
